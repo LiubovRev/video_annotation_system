@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "psifx"
+description = "Psychological and Social Interactions Feature Extraction"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Guillaume Rochette", email = "guillaume.rochette@unil.ch" },
+    { name = "Matthew Vowels", email = "matthew.vowels@unil.ch" },
+    { name = "Mathieu Rochat", email = "mathieu.louis.rochat@gmail.com" }
+]
+keywords = ["video", "audio", "language", "machine-learning", "pipeline", "multimodal"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+]
+dynamic = ["dependencies", "optional-dependencies", "version"]
+
+
+[project.urls]
+homepage = "https://github.com/psifx/psifx"
+documentation = "https://psifx.github.io/psifx/"
+repository = "https://github.com/psifx/psifx"
+
+[project.scripts]
+psifx = "psifx.command:main"
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[tool.setuptools.dynamic]
+version = {attr = "psifx.__version__"}
+dependencies = {file = ["requirements.txt"]}
+optional-dependencies.docs = { file = ["docs/requirements.txt"] }
+optional-dependencies.dev = { file = ["requirements-dev.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["psifx*"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "unit: Unit tests",
+  "integration: Integration tests",
+  "structure: Project structure checks"
+]

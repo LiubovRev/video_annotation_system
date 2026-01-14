@@ -1,0 +1,1 @@
+"""whisperx transcription module."""

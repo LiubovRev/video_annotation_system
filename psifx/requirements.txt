@@ -1,0 +1,42 @@
+# Audio Processing
+whisperx
+opensmile
+pyannote.audio
+pydub
+speechbrain
+
+# Video Processing
+absolutely-not-scikit-video
+ffmpeg-python
+mediapipe
+
+# Computer Vision
+absolutely-not-samurai
+ultralytics
+
+# Deep Learning and Torch Ecosystem
+torch
+torchvision
+torchaudio
+accelerate
+bitsandbytes
+
+# Transformers and Hugging Face Ecosystem
+transformers >= 4.41.0
+huggingface_hub
+
+# LangChain and LLM Integration
+langchain
+langchain-community
+langchain-anthropic
+langchain-openai
+langchain-ollama
+ollama
+
+# Utilities
+matplotlib <= 3.8.4
+nltk
+platformdirs
+tqdm
+loguru
+decord
