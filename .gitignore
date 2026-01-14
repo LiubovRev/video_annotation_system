@@ -1,0 +1,29 @@
+# virtual environments
+.venv/
+venv/
+
+# python
+__pycache__/
+*.pyc
+
+# data & outputs
+*.mp4
+*.avi
+*.mov
+*.jpg
+*.jpeg
+*.png
+
+Frames/
+MaskDir/
+FacesDir/
+Visualizations/
+
+# logs
+*.log
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.bin
+*.dat
