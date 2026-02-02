@@ -1,437 +1,185 @@
 #!/usr/bin/env python3
-"""
-Video processing pipeline for tracking, pose estimation, and face detection.
-Processes video through multiple analysis stages with robust error handling.
-"""
 
 import subprocess
 from pathlib import Path
 import sys
+import traceback
 import shutil
-from datetime import datetime
-from typing import List, Optional
-import json
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
+# === Custom settings ===
+nb_objects = "2"
+yolo_model = "yolo11m.pt"
+model_size = "small"
+fps = 15
+step_size = 1
+object_class = "0"
+device = "cuda"
 
-class Config:
-    """Central configuration for video processing pipeline."""
+start_trim_sec = 140
+end_trim_sec = int(60*32)
 
-    # Paths
-    BASE_PATH = Path("/home/liubov/Bureau/new/27-3-2024_#15_INDIVIDUAL_[15]")
-    RAW_VIDEO = BASE_PATH / "camera_a.mkv"
-    PROCESSED_VIDEO = BASE_PATH / "processed_video.mp4"
+base_path = Path("/home/liubov/Bureau/new/15-5-2024_#20_INDIVIDUAL_[15]")
+raw_video = base_path / "camera_a.mkv"
+processed_video = base_path / "processed_video.mp4"
 
-    # Output directories
-    FRAMES_DIR = BASE_PATH / "Frames"
-    MASK_DIR = BASE_PATH / "MaskDir"
-    POSES_DIR = BASE_PATH / "PosesDir"
-    FACES_DIR = BASE_PATH / "FacesDir"
-    VIS_DIR = BASE_PATH / "Visualizations"
-    LOG_FILE = BASE_PATH / "processing_log.log"
+frames_dir = base_path / "Frames"
+mask_dir = base_path / "MaskDir"
+poses_dir = base_path / "PosesDir"
+faces_dir = base_path / "FacesDir"
+vis_dir = base_path / "Visualizations"
+log_file_path = base_path / "processing_log.log"
 
-    # Video processing parameters
-    START_TRIM_SEC = 185
-    END_TRIM_SEC = 280
-    FPS = 15
-
-    # Tracking parameters
-    YOLO_MODEL = "yolo11s.pt"
-    MODEL_SIZE = "small"
-    MAX_OBJECTS = 3
-    OBJECT_CLASS = None  # Set to None to detect all classes, or "0" for person only
-    DEVICE = "cuda"
-
-    # Pose parameters
-    POSE_CONFIDENCE_THRESHOLD = 0.0
-
-    # Face parameters
-    FACE_DEPTH = 3.0
-    FACE_FX = 1600.0
-    FACE_FY = 1600.0
-    FACE_CX = 960.0
-    FACE_CY = 540.0
-
-    # Processing options
-    SKIP_IF_EXISTS = True  # Skip steps if output already exists
-    CLEANUP_FRAMES = True  # Remove frames directory after processing
-    CONTINUE_ON_ERROR = True  # Continue pipeline even if non-critical steps fail
+# === Ensure output directories exist ===
+for d in [frames_dir, mask_dir, poses_dir, faces_dir, vis_dir]:
+    d.mkdir(parents=True, exist_ok=True)
+log_file_path.write_text("=== Processing Log ===\n")
 
 
-# ============================================================================
-# LOGGING AND UTILITIES
-# ============================================================================
-
-class Logger:
-    """Handle logging to both console and file."""
-
-    def __init__(self, log_file: Path):
-        self.log_file = log_file
-        self.log_file.parent.mkdir(parents=True, exist_ok=True)
-        self._initialize_log()
-
-    def _initialize_log(self):
-        """Initialize log file with header."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        header = f"""
-{'='*70}
-Video Processing Pipeline Log
-Started: {timestamp}
-{'='*70}
-"""
-        self.log_file.write_text(header)
-
-    def log(self, message: str, level: str = "INFO"):
-        """Log message to both console and file."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted = f"[{timestamp}] [{level}] {message}"
-        print(formatted)
-        with open(self.log_file, "a") as f:
-            f.write(formatted + "\n")
-
-    def success(self, message: str):
-        """Log success message."""
-        self.log(message, "SUCCESS")
-
-    def warning(self, message: str):
-        """Log warning message."""
-        self.log(message, "WARNING")
-
-    def error(self, message: str):
-        """Log error message."""
-        self.log(message, "ERROR")
-
-    def section(self, title: str):
-        """Log section header."""
-        separator = "=" * 70
-        self.log(f"\n{separator}\n{title}\n{separator}")
+def log_to_file(message):
+    with open(log_file_path, "a") as log_file:
+        log_file.write(message + "\n")
 
 
-# ============================================================================
-# COMMAND EXECUTION
-# ============================================================================
-
-class CommandRunner:
-    """Execute shell commands with logging and error handling."""
-
-    def __init__(self, logger: Logger):
-        self.logger = logger
-
-    def run(self, cmd: List[str], description: str,
-            critical: bool = True) -> Optional[subprocess.CompletedProcess]:
-        """
-        Execute a command with proper error handling.
-
-        Args:
-            cmd: Command and arguments as list
-            description: Human-readable description of the command
-            critical: If True, exit on failure; if False, continue pipeline
-
-        Returns:
-            CompletedProcess object if successful, None if failed
-        """
-        self.logger.log(f"Running: {description}")
-        self.logger.log(f"Command: {' '.join(map(str, cmd))}")
-
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-
-            self.logger.success(f"{description} completed")
-
-            if result.stdout and result.stdout.strip():
-                self.logger.log(f"Output: {result.stdout.strip()}")
-
-            if result.stderr and result.stderr.strip():
-                # Filter out common warnings
-                stderr_lines = result.stderr.strip().split('\n')
-                important_lines = [
-                    line for line in stderr_lines
-                    if not any(skip in line for skip in [
-                        'UserWarning',
-                        'torchaudio._backend.list_audio_backends',
-                        'GPU device discovery failed'
-                    ])
-                ]
-                if important_lines:
-                    self.logger.log(f"Warnings: {chr(10).join(important_lines)}")
-
-            return result
-
-        except subprocess.CalledProcessError as e:
-            self.logger.error(f"{description} failed with exit code {e.returncode}")
-
-            if e.stdout:
-                self.logger.log(f"STDOUT: {e.stdout}")
-            if e.stderr:
-                self.logger.log(f"STDERR: {e.stderr}")
-
-            if critical:
-                self.logger.error("Critical step failed. Exiting pipeline.")
-                sys.exit(1)
-            else:
-                self.logger.warning(f"Non-critical step failed. Continuing pipeline.")
-                return None
+def run_cmd(cmd, step_desc):
+    print(f"\n>>> {step_desc}")
+    print("Running command:", " ".join(map(str, cmd)))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        print("Command succeeded.")
+        if result.stdout:
+            print("STDOUT:", result.stdout)
+        if result.stderr:
+            print("STDERR:", result.stderr)
+        return result
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {step_desc} failed with exit code {e.returncode}")
+        print("STDOUT:", e.stdout)
+        print("STDERR:", e.stderr)
+        log_to_file(f"[FAILED] {step_desc}: {e.stderr.strip()}")
+        sys.exit(1)
 
 
-# ============================================================================
-# PROCESSING STEPS
-# ============================================================================
-
-class VideoProcessor:
-    """Main video processing pipeline."""
-
-    def __init__(self, config: Config, logger: Logger, runner: CommandRunner):
-        self.config = config
-        self.logger = logger
-        self.runner = runner
-        self._ensure_directories()
-
-    def _ensure_directories(self):
-        """Create all necessary output directories."""
-        for directory in [
-            self.config.FRAMES_DIR,
-            self.config.MASK_DIR,
-            self.config.POSES_DIR,
-            self.config.FACES_DIR,
-            self.config.VIS_DIR
-        ]:
-            directory.mkdir(parents=True, exist_ok=True)
-
-    def _should_skip(self, output_path: Path, step_name: str) -> bool:
-        """Check if a step should be skipped based on existing output."""
-        if not self.config.SKIP_IF_EXISTS:
-            return False
-
-        if output_path.exists():
-            if output_path.is_dir() and any(output_path.iterdir()):
-                self.logger.warning(f"Skipping {step_name}: Output already exists at {output_path}")
-                return True
-            elif output_path.is_file():
-                self.logger.warning(f"Skipping {step_name}: Output already exists at {output_path}")
-                return True
-
-        return False
-
-    def process_video(self):
-        """Trim and resample the raw video."""
-        self.logger.section("Step 1: Video Preprocessing")
-
-        if self._should_skip(self.config.PROCESSED_VIDEO, "video preprocessing"):
-            return
-
-        cmd = [
+# === Step 1: Trim and sample video (only if Frames folder is empty) ===
+if frames_dir.exists() and any(frames_dir.iterdir()):
+    print(f"Frames folder already exists and is not empty: {frames_dir}")
+    log_to_file(f"[SKIPPED] Frame extraction skipped: {frames_dir} already populated")
+else:
+    if not processed_video.exists():
+        ffmpeg_trim_cmd = [
             "ffmpeg", "-y",
-            "-i", str(self.config.RAW_VIDEO),
-            "-ss", str(self.config.START_TRIM_SEC),
-            "-to", str(self.config.END_TRIM_SEC),
-            "-filter:v", f"fps={self.config.FPS}",
-            str(self.config.PROCESSED_VIDEO)
+            "-i", str(raw_video),
+            "-ss", str(start_trim_sec),
+            "-to", str(end_trim_sec),
+            "-filter:v", f"fps={fps}",
+            str(processed_video)
         ]
+        run_cmd(ffmpeg_trim_cmd, "Trimming and sampling video")
+        log_to_file(f"[OK] Processed video created: {processed_video}")
+    else:
+        log_to_file(f"[OK] Processed video exist: {processed_video}")
 
-        self.runner.run(cmd, "Trimming and resampling video", critical=True)
+# === Step 2: Run tracking inference ===
+tracking_cmd = [
+    "psifx", "video", "tracking", "samurai", "inference",
+    "--video", str(processed_video),
+    "--mask_dir", str(mask_dir),
+    "--model_size", "small",
+    "--yolo_model", yolo_model,
+    "--max_objects", "2",
+    "--step", "1",
+    "--device", "cuda",
+    "--overwrite"
+]
 
-    def run_tracking(self):
-        """Run SAMURAI tracking inference."""
-        self.logger.section("Step 2: Object Tracking")
+run_cmd(tracking_cmd, "Tracking inference")
+log_to_file("[OK] Tracking inference completed successfully")
 
-        if self._should_skip(self.config.MASK_DIR, "tracking inference"):
-            return
+vis_track = vis_dir / "visualization_tracking.mp4"
+track_cmd = [
+    "psifx", "video", "tracking", "visualization",
+    "--video", str(processed_video),
+    "--masks", mask_dir,
+    "--visualization", str(vis_track),
+    "--overwrite"
+]
+run_cmd(track_cmd, "Tracking visualization")
+log_to_file("[OK] Tracking visualization completed successfully")
 
-        cmd = [
-            "psifx", "video", "tracking", "samurai", "inference",
-            "--video", str(self.config.PROCESSED_VIDEO),
-            "--mask_dir", str(self.config.MASK_DIR),
-            "--model_size", self.config.MODEL_SIZE,
-            "--yolo_model", self.config.YOLO_MODEL,
-            "--max_objects", str(self.config.MAX_OBJECTS),
-            "--device", self.config.DEVICE,
-            "--overwrite"
-        ]
+run_cmd([
+        "psifx", "video", "pose", "mediapipe", "multi-inference",
+        "--video", str(processed_video),
+        "--masks", mask_dir,
+        "--poses_dir", poses_dir,
+        "--device", "cuda",
+        "--overwrite"
+    ], "Pose inference")
 
-        # Add object class filter if specified
-        if self.config.OBJECT_CLASS is not None:
-            cmd.extend(["--object_class", str(self.config.OBJECT_CLASS)])
-
-        result = self.runner.run(cmd, "Object tracking inference",
-                                critical=not self.config.CONTINUE_ON_ERROR)
-
-        # Check if masks were generated
-        if result:
-            mask_files = list(self.config.MASK_DIR.glob("*.npz"))
-            if not mask_files:
-                self.logger.error("No masks generated! YOLO may not be detecting objects.")
-                self.logger.warning("Try removing --object_class filter or check your video content")
-            else:
-                self.logger.success(f"Generated {len(mask_files)} mask files")
-
-    def visualize_tracking(self):
-        """Create tracking visualization video."""
-        self.logger.section("Step 3: Tracking Visualization")
-
-        vis_path = self.config.VIS_DIR / "visualization_tracking.mp4"
-
-        if self._should_skip(vis_path, "tracking visualization"):
-            return
-
-        cmd = [
-            "psifx", "video", "tracking", "visualization",
-            "--video", str(self.config.PROCESSED_VIDEO),
-            "--masks", str(self.config.MASK_DIR),
-            "--visualization", str(vis_path),
-            "--overwrite"
-        ]
-
-        self.runner.run(cmd, "Creating tracking visualization",
-                       critical=not self.config.CONTINUE_ON_ERROR)
-
-    def run_pose_estimation(self):
-        """Run MediaPipe pose estimation."""
-        self.logger.section("Step 4: Pose Estimation")
-
-        if self._should_skip(self.config.POSES_DIR, "pose estimation"):
-            return
-
-        cmd = [
-            "psifx", "video", "pose", "mediapipe", "multi-inference",
-            "--video", str(self.config.PROCESSED_VIDEO),
-            "--masks", str(self.config.MASK_DIR),
-            "--poses_dir", str(self.config.POSES_DIR),
-            "--device", self.config.DEVICE,
-            "--overwrite"
-        ]
-
-        self.runner.run(cmd, "Pose estimation inference",
-                       critical=not self.config.CONTINUE_ON_ERROR)
-
-    def visualize_pose(self):
-        """Create pose visualization video."""
-        self.logger.section("Step 5: Pose Visualization")
-
-        vis_path = self.config.VIS_DIR / "visualization_pose.mp4"
-
-        if self._should_skip(vis_path, "pose visualization"):
-            return
-
-        cmd = [
-            "psifx", "video", "pose", "mediapipe", "visualization",
-            "--video", str(self.config.PROCESSED_VIDEO),
-            "--poses", str(self.config.POSES_DIR),
-            "--visualization", str(vis_path),
-            "--confidence_threshold", str(self.config.POSE_CONFIDENCE_THRESHOLD),
-            "--overwrite"
-        ]
-
-        self.runner.run(cmd, "Creating pose visualization",
-                       critical=not self.config.CONTINUE_ON_ERROR)
-
-    def run_face_detection(self):
-        """Run OpenFace face detection."""
-        self.logger.section("Step 6: Face Detection")
-
-        if self._should_skip(self.config.FACES_DIR, "face detection"):
-            return
-
-        cmd = [
-            "psifx", "video", "face", "openface", "multi-inference",
-            "--video", str(self.config.PROCESSED_VIDEO),
-            "--masks", str(self.config.MASK_DIR),
-            "--features_dir", str(self.config.FACES_DIR),
-            "--device", self.config.DEVICE,
-            "--overwrite"
-        ]
-
-        self.runner.run(cmd, "Face detection inference",
-                       critical=not self.config.CONTINUE_ON_ERROR)
-
-    def visualize_face(self):
-        """Create face visualization video."""
-        self.logger.section("Step 7: Face Visualization")
-
-        vis_path = self.config.VIS_DIR / "visualization_face.mp4"
-
-        if self._should_skip(vis_path, "face visualization"):
-            return
-
-        cmd = [
-            "psifx", "video", "face", "openface", "visualization",
-            "--video", str(self.config.PROCESSED_VIDEO),
-            "--features", str(self.config.FACES_DIR),
-            "--visualization", str(vis_path),
-            "--depth", str(self.config.FACE_DEPTH),
-            "--f_x", str(self.config.FACE_FX),
-            "--f_y", str(self.config.FACE_FY),
-            "--c_x", str(self.config.FACE_CX),
-            "--c_y", str(self.config.FACE_CY),
-            "--overwrite"
-        ]
-
-        self.runner.run(cmd, "Creating face visualization",
-                       critical=not self.config.CONTINUE_ON_ERROR)
-
-    def cleanup(self):
-        """Clean up temporary files."""
-        if not self.config.CLEANUP_FRAMES:
-            return
-
-        self.logger.section("Step 8: Cleanup")
-
-        try:
-            if self.config.FRAMES_DIR.exists():
-                self.logger.log(f"Removing frames directory: {self.config.FRAMES_DIR}")
-                shutil.rmtree(self.config.FRAMES_DIR)
-                self.logger.success("Frames directory removed")
-        except Exception as e:
-            self.logger.warning(f"Failed to remove frames directory: {e}")
-
-    def run_full_pipeline(self):
-        """Execute the complete processing pipeline."""
-        self.logger.section("Starting Video Processing Pipeline")
-
-        try:
-            self.process_video()
-            self.run_tracking()
-            self.visualize_tracking()
-            self.run_pose_estimation()
-            self.visualize_pose()
-            self.run_face_detection()
-            self.visualize_face()
-            self.cleanup()
-
-            self.logger.section("Pipeline Complete")
-            self.logger.success(f"All results saved to: {self.config.BASE_PATH}")
-            self.logger.success(f"Log file: {self.config.LOG_FILE}")
-
-        except KeyboardInterrupt:
-            self.logger.warning("\nPipeline interrupted by user")
-            sys.exit(0)
-        except Exception as e:
-            self.logger.error(f"Unexpected error: {e}")
-            sys.exit(1)
+# === Step 3: Visualize pose ===
+vis_pose = vis_dir / "visualization_pose.mp4"
+pose_cmd = [
+    "psifx", "video", "pose", "mediapipe", "visualization",
+    "--video", str(processed_video),
+    "--poses", str(poses_dir),
+    "--visualization", str(vis_pose),
+    "--confidence_threshold", "0.0",
+    "--overwrite"
+]
 
 
-# ============================================================================
-# MAIN EXECUTION
-# ============================================================================
 
-def main():
-    """Main entry point for the video processing pipeline."""
+try:
+    run_cmd(pose_cmd, "Visualizing pose")
+    log_to_file("[OK] Pose visualization completed successfully")
+except Exception as e:
+    log_to_file(f"[WARNING] Pose visualization failed: {str(e)}")
 
-    # Initialize components
-    config = Config()
-    logger = Logger(config.LOG_FILE)
-    runner = CommandRunner(logger)
-    processor = VideoProcessor(config, logger, runner)
+## === Step 4: Face feature extraction ===
+#face_cmd = [
+    #"psifx", "video", "face", "openface", "multi-inference",
+    #"--video", str(processed_video),
+    #"--masks", str(mask_dir),
+    #"--features_dir", str(faces_dir),
+    #"--device", device,
+    #"--overwrite"
+#]
 
-    # Run the pipeline
-    processor.run_full_pipeline()
+#try:
+    #run_cmd(face_cmd, "Face inference")
+    #log_to_file("[OK] Face inference completed successfully")
+#except Exception as e:
+    #log_to_file(f"[WARNING] Face inference failed: {str(e)}")
 
+## === Step 5: Visualize face features ===
+#vis_face = vis_dir / "visualization_face.mp4"
+#face_vis_cmd = [
+    #"psifx", "video", "face", "openface", "visualization",
+    #"--video", str(processed_video),
+    #"--features", str(faces_dir),
+    #"--visualization", str(vis_face),
+    #"--depth", "3.0",
+    #"--f_x", "1600.0", "--f_y", "1600.0",
+    #"--c_x", "960.0", "--c_y", "540.0",
+    #"--overwrite"
+#]
 
-if __name__ == "__main__":
-    main()
+#try:
+    #run_cmd(face_vis_cmd, "Visualizing face")
+    #log_to_file("[OK] Face visualization completed successfully")
+#except Exception as e:
+    #log_to_file(f"[WARNING] Face visualization failed: {str(e)}")
+
+# === Step 6: Cleanup frames directory ===
+try:
+    if frames_dir.exists():
+        print(f"Cleaning up frames directory: {frames_dir}")
+        shutil.rmtree(frames_dir)
+        log_to_file(f"[OK] Cleaned up frames directory: {frames_dir}")
+except Exception as e:
+    log_to_file(f"[WARNING] Failed to clean up frames directory: {str(e)}")
+
+# === Final Summary ===
+print("\n==================== Processing Complete ====================")
+num_frames = len(list(frames_dir.glob("*.jpg"))) if frames_dir.exists() else 0
+#print(f"Total frames processed: {num_frames}")
+print(f"Results saved to: {base_path}")
+print(f"See {log_file_path} for details.")
