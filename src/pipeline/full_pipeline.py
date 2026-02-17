@@ -11,8 +11,9 @@ Pipeline stages (per project):
   Step 3 — Pose clustering    (src/pose/clustering.py)  [optional]
   Step 4 — Annotation alignment (src/annotations/generator.py)
 
-Followed by:
-  Combine labeled features → Data sanitization → Model training
+Followed by (across all projects):
+  Step 5 — Model training     (src/models/train.py)     [skipped if model exists]
+  Step 6 — Prediction         (src/models/predict.py)   [run standalone]
 
 Configuration is loaded from config.yaml at the project root.
 """
@@ -35,6 +36,8 @@ from video_processing.processing import run_video_processing
 from pose.extractor import run_pose_extraction
 from pose.clustering import run_pose_clustering
 from annotations.generator import run_annotation_alignment
+from models.train import train_model
+from models.predict import predict_annotations
 
 
 # =========================
@@ -171,154 +174,101 @@ if combined_path.exists() and not FORCE_RECOMBINE:
 
 if not combined_path.exists() or FORCE_RECOMBINE:
     labeled_files = list(OUTPUT_BASE_DIR.glob("*/labeled_features.csv"))
-    
+
     if not labeled_files:
         print("⚠ No labeled feature files found — cannot combine.")
         exit()
-    
+
     print(f"✓ Found {len(labeled_files)} labeled feature files.")
-    
     all_dfs = []
     for f in labeled_files:
         try:
             df_part = pd.read_csv(f)
             df_part["project_name"] = f.parent.name
             all_dfs.append(df_part)
-            print(f"  ✓ Loaded: {f.parent.name} ({len(df_part)} rows)")
+            print(f"  ✓ Loaded: {f.parent.name} ({len(df_part):,} rows)")
         except Exception as e:
             print(f"  ⚠ Skipping {f.name}: {e}")
 
-    if all_dfs:
-        combined_df = pd.concat(all_dfs, ignore_index=True)
-        print(f"✓ Combined dataset shape: {combined_df.shape}")
-        
-        combined_df.to_csv(combined_path, index=False)
-        print(f"✓ Saved combined labeled data to: {combined_path}")
-        
-        # Plot global annotation distribution with A0 POSTER styling
-        try:
-            label_counts = combined_df['annotation_label'].value_counts().sort_values(ascending=False)
-            
-            # A0 poster sizing - EXTRA WIDE for horizontal labels
-            fig, ax = plt.subplots(figsize=(24, 12))
-            
-            # Create viridis colors for bars
-            n_bars = len(label_counts)
-            colors = plt.cm.viridis(np.linspace(0.2, 0.9, n_bars))
-            
-            bars = ax.bar(range(n_bars), label_counts.values, 
-                         color=colors, edgecolor='black', linewidth=2.5, alpha=0.85, width=0.7)
-            
-            ax.set_title("Global Annotation Distribution (All Projects)", 
-                        fontsize=40, weight='bold', pad=25)
-            ax.set_xlabel("Annotation Label", fontsize=36, weight='bold')
-            ax.set_ylabel("Total Count", fontsize=36, weight='bold')
-            
-            # Set x-tick labels HORIZONTALLY
-            ax.set_xticks(range(n_bars))
-            ax.set_xticklabels(label_counts.index, fontsize=30, rotation=0)
-            ax.tick_params(axis='y', labelsize=30)
-            
-            # Add count labels on bars
-            for i, (bar, count) in enumerate(zip(bars, label_counts.values)):
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{count:,}',
-                       ha='center', va='bottom', fontsize=26, weight='bold')
-            
-            ax.grid(True, alpha=0.3, axis='y', linewidth=1.5)
-            plt.tight_layout()
-            
-#             global_plot_path = OUTPUT_BASE_DIR / "global_annotation_distribution.png"
-#             plt.savefig(global_plot_path, dpi=300, bbox_inches='tight', facecolor='white')
-            plt.close()
-            
-#             print(f"✓ Saved global annotation distribution: {global_plot_path.name}")
-            
-            # Also save individual class statistics
-#             stats_path = OUTPUT_BASE_DIR / "annotation_statistics.txt"
-#             with open(stats_path, 'w') as f:
-#                 f.write("="*70 + "\n")
-#                 f.write("GLOBAL ANNOTATION STATISTICS\n")
-#                 f.write("="*70 + "\n\n")
-#                 f.write(f"Total labeled frames: {len(combined_df):,}\n")
-#                 f.write(f"Unique classes: {combined_df['annotation_label'].nunique()}\n")
-#                 f.write(f"Number of projects: {combined_df['project_name'].nunique()}\n\n")
-#                 f.write("Class Distribution:\n")
-#                 f.write("-"*70 + "\n")
-#                 for label, count in label_counts.items():
-#                     percentage = (count / len(combined_df)) * 100
-#                     f.write(f"{label:15s}: {count:6,} ({percentage:5.2f}%)\n")
-            
-#             print(f"✓ Saved annotation statistics: {stats_path.name}")
-            
-        except Exception as e:
-            print(f"  ⚠ Failed to plot global distribution: {e}")
-    else:
+    if not all_dfs:
         print("✗ No valid dataframes to combine")
         exit()
+
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    print(f"✓ Combined dataset shape: {combined_df.shape}")
+    combined_df.to_csv(combined_path, index=False)
+    print(f"✓ Saved: {combined_path.name}")
+
+    # Plot global annotation distribution
+    try:
+        label_counts = combined_df["annotation_label"].value_counts().sort_values(ascending=False)
+        n_bars  = len(label_counts)
+        colors  = plt.cm.viridis(np.linspace(0.2, 0.9, n_bars))
+        fig, ax = plt.subplots(figsize=(24, 12))
+        bars = ax.bar(range(n_bars), label_counts.values,
+                      color=colors, edgecolor="black", linewidth=2.5, alpha=0.85, width=0.7)
+        ax.set_title("Global Annotation Distribution (All Projects)",
+                     fontsize=40, weight="bold", pad=25)
+        ax.set_xlabel("Annotation Label", fontsize=36, weight="bold")
+        ax.set_ylabel("Total Count",      fontsize=36, weight="bold")
+        ax.set_xticks(range(n_bars))
+        ax.set_xticklabels(label_counts.index, fontsize=30, rotation=0)
+        ax.tick_params(axis="y", labelsize=30)
+        for bar, count in zip(bars, label_counts.values):
+            ax.text(bar.get_x() + bar.get_width() / 2., bar.get_height(),
+                    f"{count:,}", ha="center", va="bottom", fontsize=26, weight="bold")
+        ax.grid(True, alpha=0.3, axis="y", linewidth=1.5)
+        plt.tight_layout()
+        global_plot_path = OUTPUT_BASE_DIR / "global_annotation_distribution.png"
+        plt.savefig(global_plot_path, dpi=cfg["plotting"]["dpi"],
+                    bbox_inches="tight", facecolor="white")
+        plt.close()
+        print(f"✓ Saved: {global_plot_path.name}")
+    except Exception as e:
+        print(f"  ⚠ Failed to plot global distribution: {e}")
 
 # =========================
 # Data Sanitization
 # =========================
 print("\n--- Data Sanitization ---")
 combined_df = pd.read_csv(combined_path)
-
-# Handle infinite values
 combined_df.replace([np.inf, -np.inf], np.nan, inplace=True)
 before_drop = len(combined_df)
 combined_df.dropna(inplace=True)
-after_drop = len(combined_df)
-dropped = before_drop - after_drop
+dropped = before_drop - len(combined_df)
+print(f"✓ {'Dropped ' + str(dropped) + ' rows with NaN/infinite values.' if dropped else 'No rows with NaN/infinite values found.'}")
 
-if dropped > 0:
-    print(f"✓ Dropped {dropped} rows with NaN/infinite values.")
-else:
-    print(f"✓ No rows with NaN/infinite values found.")
-
-# Check feature ranges
 numeric_cols = combined_df.select_dtypes(include=[np.number]).columns
 max_val = combined_df[numeric_cols].abs().max().max()
 print(f"✓ Feature values within reasonable range (max={max_val:.2e}).")
 
-# Save sanitized data
 sanitized_path = OUTPUT_BASE_DIR / "combined_labeled_features_sanitized.csv"
 combined_df.to_csv(sanitized_path, index=False)
 print(f"✓ Saved sanitized data: {sanitized_path.name}")
 
 # =========================
-# MODEL TRAINING
+# Step 5: Model Training
 # =========================
 print("\n" + "="*70)
 print("MODEL TRAINING")
 print("="*70)
 
-try:
-    results = {'labeled_features': combined_df}
-    model_package = mt.main(results, output_dir=OUTPUT_BASE_DIR)
-    
-    print(f"\n✓ Combined model training complete.")
-    print(f"✓ Best Model: {model_package['model_name']}")
-    print(f"✓ Final F1 Score: {model_package['f1_score']:.4f}")
-    
-    # Save model summary
-    summary_path = OUTPUT_BASE_DIR / "model_training_summary.txt"
-    with open(summary_path, 'w') as f:
-        f.write("="*70 + "\n")
-        f.write("MODEL TRAINING SUMMARY\n")
-        f.write("="*70 + "\n\n")
-        f.write(f"Best Model: {model_package['model_name']}\n")
-        f.write(f"F1 Score: {model_package['f1_score']:.4f}\n")
-        f.write(f"Training data shape: {combined_df.shape}\n")
-        f.write(f"Number of classes: {combined_df['annotation_label'].nunique()}\n")
-        f.write(f"Number of projects: {combined_df['project_name'].nunique()}\n")
-    
-    print(f"✓ Saved model summary: {summary_path.name}")
-    
-except Exception as e:
-    print(f"✗ Combined model training failed: {e}")
-    import traceback
-    traceback.print_exc()
+model_file = OUTPUT_BASE_DIR / cfg["model"]["file"]
+if model_file.exists():
+    print(f"✓ Model already exists: {model_file.name} — skipping training.")
+    print("  (Delete the file or set a new model.file path to retrain.)")
+    model_package = None
+else:
+    try:
+        model_package = train_model(combined_df, OUTPUT_BASE_DIR, cfg)
+        print(f"\n✓ Training complete.")
+        print(f"✓ Best Model: {model_package['model_name']}")
+        print(f"✓ Final F1 Score: {model_package['f1_score']:.4f}")
+    except Exception as e:
+        print(f"✗ Model training failed: {e}")
+        import traceback
+        traceback.print_exc()
+        model_package = None
 
 # =========================
 # Final Summary
@@ -328,5 +278,7 @@ print("PIPELINE COMPLETE - SUMMARY")
 print("="*70)
 print(f"✓ All projects processed")
 print(f"✓ Results saved in: {OUTPUT_BASE_DIR}")
-
+if model_package:
+    print(f"✓ Best Model: {model_package['model_name']}")
+    print(f"✓ F1 Score:   {model_package['f1_score']:.4f}")
 print("="*70)
