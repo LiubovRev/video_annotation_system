@@ -60,7 +60,14 @@ source ~/.venv/bin/activate
 
 ### 2. Install dependencies
 
-`pip install -r requirements.txt`  
+```bash
+pip install -r requirements.txt
+```
+
+> **Note:** `psifx` is a local package. If it is not already installed, install it manually before running `requirements.txt`:
+> ```bash
+> pip install -e /path/to/psifx
+> ```
 
 ### 3. Configure paths
 
@@ -151,18 +158,32 @@ Converts model predictions into structured annotation files ready for downstream
 
 Key dependencies (see `requirements.txt` for full list):
 
-- `pandas`
-- `numpy`
-- `scikit-learn`
-- `xgboost`
-- `joblib`
-- `matplotlib`
-- `seaborn`
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `torch` | 2.8.0 | Deep learning backbone |
+| `torchvision` | 0.23.0 | Video/image transforms |
+| `torchaudio` | 2.8.0 | Audio processing |
+| `transformers` | 4.57.0 | Pretrained model hub |
+| `scikit-learn` | 1.7.2 | ML utilities and metrics |
+| `xgboost` | *(via scikit-learn)* | Pose classifier |
+| `pandas` | 2.2.3 | Data manipulation |
+| `numpy` | 2.0.2 | Numerical computing |
+| `opencv-python` | 4.12.0.88 | Video frame processing |
+| `mediapipe` | 0.10.14 | Pose keypoint extraction |
+| `psifx` | local | Video preprocessing (see below) |
+| `faster-whisper` | 1.2.0 | Speech transcription |
+| `pyannote.audio` | 3.3.2 | Speaker diarization |
+| `matplotlib` | 3.8.4 | Plotting and visualization |
+| `joblib` | 1.5.2 | Model serialization |
+| `ultralytics` | 8.3.212 | YOLO-based detection |
+| `accelerate` | 1.10.1 | Multi-GPU / mixed precision |
+| `optuna` | 4.5.0 | Hyperparameter optimization |
+| `langchain` | 0.3.27 | LLM orchestration |
 
 ---
 
 ## Notes
 
-- All scripts are executable standalone (`python script.py`) and follow `if __name__ == "__main__"` conventions.
+- All scripts are executable standalone (`python3 processing.py`) and follow `if __name__ == "__main__"` conventions.
 - Intermediate outputs (processed CSVs, model files) are saved to the `models/` and `data/` directories.
 - Notebooks in `notebooks/` contain exploratory analysis and were used to develop the pipeline logic.
