@@ -171,14 +171,11 @@ Key dependencies (see `requirements.txt` for full list):
 | `opencv-python` | 4.12.0.88 | Video frame processing |
 | `mediapipe` | 0.10.14 | Pose keypoint extraction |
 | `psifx` | local | Video preprocessing (see below) |
-| `faster-whisper` | 1.2.0 | Speech transcription |
-| `pyannote.audio` | 3.3.2 | Speaker diarization |
 | `matplotlib` | 3.8.4 | Plotting and visualization |
 | `joblib` | 1.5.2 | Model serialization |
 | `ultralytics` | 8.3.212 | YOLO-based detection |
 | `accelerate` | 1.10.1 | Multi-GPU / mixed precision |
 | `optuna` | 4.5.0 | Hyperparameter optimization |
-| `langchain` | 0.3.27 | LLM orchestration |
 
 ---
 
