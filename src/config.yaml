@@ -136,3 +136,29 @@ plotting:
   figsize_per_project: [18, 10]
   figsize_global:      [24, 12]
   colormap:            "viridis"
+
+# -----------------------------------------------------------------------------
+# Model training (Step 5 — src/models/train.py)
+# Training is skipped automatically if model.file already exists.
+# Delete the .joblib file (or change model.file path) to retrain.
+# -----------------------------------------------------------------------------
+model_training:
+  min_samples_per_class: 30       # Classes below this count are excluded
+  test_size:             0.2      # Fraction of data held out for evaluation
+  n_iter_search:         50       # RandomizedSearchCV iterations for XGBoost
+  # Classes to exclude from training (non-posture signals)
+  non_posture_classes:   ["vocalizations", "unlabeled"]
+  # Uncomment to override DEFAULT_LABEL_TO_CLASS from train.py:
+  # label_to_class:
+  #   "CCR": "coordination"
+  #   "CHO": "coordination"
+  #   ...
+
+# -----------------------------------------------------------------------------
+# Prediction (Step 6 — src/models/predict.py)
+# Run predict.py standalone for inference on new projects.
+# -----------------------------------------------------------------------------
+predict:
+  # Set data_path for single-project prediction; leave null for batch mode
+  data_path: null
+  # e.g. data_path: "/home/liubov/Bureau/new/14-3-2024_#15_INDIVIDUAL_[18]/PosesDir/processed_data.csv"
