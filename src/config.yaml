@@ -49,6 +49,21 @@ pose_extraction:
     "1": "Therapist1"
     "2": "Patient1"
 
+
+# -----------------------------------------------------------------------------
+# Annotation alignment (Step 4 — src/annotations/generator.py)
+# -----------------------------------------------------------------------------
+annotation_alignment:
+  # Subfolder inside each raw project dir that contains processed_data.csv
+  features_subdir:    "PosesDir"
+  # Column to drop after alignment (utility columns not needed for training)
+  columns_to_drop:    ["time_min:s.ms"]
+  # Person label inferred from annotation label prefix
+  # "C*" -> Child, "T*" -> Therapist
+  label_prefix_map:
+    "C": "Child"
+    "T": "Therapist"
+
 # -----------------------------------------------------------------------------
 # Pose clustering (optional Step 3 — src/pose/clustering.py)
 # Set flags.skip_pose_clustering: true to bypass this step entirely.
