@@ -1,0 +1,69 @@
+# =============================================================================
+# config.yaml
+# Full Pipeline Configuration
+# Edit this file to configure paths, flags, and project parameters.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Directories
+# -----------------------------------------------------------------------------
+directories:
+  base_data_dir:      "/home/liubov/Bureau/new/processed_data"
+  output_base_dir:    "/home/liubov/Bureau/new/output_data"
+  annotations_dir:    "/home/liubov/Bureau/new/new_annotations"
+
+# -----------------------------------------------------------------------------
+# Pipeline flags
+# Set to true to skip a stage if its output already exists (speeds up reruns).
+# -----------------------------------------------------------------------------
+flags:
+  skip_pose_clustering:       true    # Skip re-running clustering if cached parquet exists
+  skip_annotation_processing: true    # Skip annotation alignment if combined file exists
+  force_recombine:            false   # Force re-combining all labeled datasets
+
+# -----------------------------------------------------------------------------
+# Project trim times
+# Format per project: [start_sec, end_sec, fps]
+# Use null for end_sec to trim to the end of the video.
+# -----------------------------------------------------------------------------
+trim_times:
+  "11-1-2024_#9_INDIVIDUAL_[18]":   [165,  1930, 15]
+  "23-5-2024_#20_INDIVIDUAL_[14]":  [500,  2595, 15]
+  "14-3-2024_#15_INDIVIDUAL_[18]":  [165,  1860, 15]
+  "11-1-2024_#7_INDIVIDUAL_[14]":   [170,  2160, 15]
+  "10-1-2024_#6_INDIVIDUAL_[15]":   [210,  2940, 15]
+
+default_trim: [0, null, 15]
+
+# -----------------------------------------------------------------------------
+# Label map
+# Numeric model output -> human-readable annotation code
+# -----------------------------------------------------------------------------
+label_map:
+  0:  "C"
+  1:  "CCR"
+  2:  "CHO"
+  3:  "CSI"
+  4:  "CST"
+  5:  "T"
+  6:  "TC"
+  7:  "TRE"
+  8:  "TSI"
+  9:  "TST"
+
+# -----------------------------------------------------------------------------
+# Model
+# -----------------------------------------------------------------------------
+model:
+  file:          "model_xgboost.joblib"
+  features_file: "feature_names.json"
+  fps:           15
+
+# -----------------------------------------------------------------------------
+# Plotting
+# -----------------------------------------------------------------------------
+plotting:
+  dpi:        300
+  figsize_per_project: [18, 10]
+  figsize_global:      [24, 12]
+  colormap:   "viridis"
