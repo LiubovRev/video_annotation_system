@@ -1,185 +1,240 @@
 #!/usr/bin/env python3
+# coding: utf-8
+"""
+processing.py
+-------------
+Step 1 of the Video Annotation Pipeline.
+Handles per-project video preprocessing:
+  - Trim and sample raw video with ffmpeg
+  - Run SAMURAI tracking inference (psifx)
+  - Run MediaPipe pose inference (psifx)
+  - Visualize tracking and pose results
+  - Clean up intermediate frames directory
+
+Can be run standalone (processes a single project) or imported and called
+by full_pipeline.py via run_video_processing(project_path, cfg).
+
+Configuration is loaded from config.yaml at the project root.
+"""
 
 import subprocess
-from pathlib import Path
+import shutil
 import sys
 import traceback
-import shutil
+from pathlib import Path
 
-# === Custom settings ===
-nb_objects = "2"
-yolo_model = "yolo11m.pt"
-model_size = "small"
-fps = 15
-step_size = 1
-object_class = "0"
-device = "cuda"
-
-start_trim_sec = 0
-end_trim_sec = None
-
-base_path = Path("/home/liubov/Bureau/new/15-5-2024_#20_INDIVIDUAL_[15]")
-raw_video = base_path / "camera_a.mkv"
-processed_video = base_path / "processed_video.mp4"
-
-frames_dir = base_path / "Frames"
-mask_dir = base_path / "MaskDir"
-poses_dir = base_path / "PosesDir"
-faces_dir = base_path / "FacesDir"
-vis_dir = base_path / "Visualizations"
-log_file_path = base_path / "processing_log.log"
-
-# === Ensure output directories exist ===
-for d in [frames_dir, mask_dir, poses_dir, faces_dir, vis_dir]:
-    d.mkdir(parents=True, exist_ok=True)
-log_file_path.write_text("=== Processing Log ===\n")
+import yaml
 
 
-def log_to_file(message):
-    with open(log_file_path, "a") as log_file:
-        log_file.write(message + "\n")
+# =============================================================================
+# Helpers
+# =============================================================================
+
+def _log(log_file_path: Path, message: str) -> None:
+    with open(log_file_path, "a") as f:
+        f.write(message + "\n")
 
 
-def run_cmd(cmd, step_desc):
+def _run_cmd(cmd: list, step_desc: str, log_file_path: Path) -> subprocess.CompletedProcess:
+    """Run a shell command, print output, log errors, exit on failure."""
     print(f"\n>>> {step_desc}")
-    print("Running command:", " ".join(map(str, cmd)))
+    print("Command:", " ".join(map(str, cmd)))
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        print("Command succeeded.")
+        print("Succeeded.")
         if result.stdout:
             print("STDOUT:", result.stdout)
         if result.stderr:
             print("STDERR:", result.stderr)
         return result
     except subprocess.CalledProcessError as e:
-        print(f"Error: {step_desc} failed with exit code {e.returncode}")
+        print(f"Error: {step_desc} failed (exit {e.returncode})")
         print("STDOUT:", e.stdout)
         print("STDERR:", e.stderr)
-        log_to_file(f"[FAILED] {step_desc}: {e.stderr.strip()}")
-        sys.exit(1)
+        _log(log_file_path, f"[FAILED] {step_desc}: {e.stderr.strip()}")
+        raise
 
 
-# === Step 1: Trim and sample video (only if Frames folder is empty) ===
-if frames_dir.exists() and any(frames_dir.iterdir()):
-    print(f"Frames folder already exists and is not empty: {frames_dir}")
-    log_to_file(f"[SKIPPED] Frame extraction skipped: {frames_dir} already populated")
-else:
-    if not processed_video.exists():
-        ffmpeg_trim_cmd = [
-            "ffmpeg", "-y",
-            "-i", str(raw_video),
-            "-ss", str(start_trim_sec),
-            "-to", str(end_trim_sec),
-            "-filter:v", f"fps={fps}",
-            str(processed_video)
-        ]
-        run_cmd(ffmpeg_trim_cmd, "Trimming and sampling video")
-        log_to_file(f"[OK] Processed video created: {processed_video}")
+# =============================================================================
+# Core processing function (importable by full_pipeline.py)
+# =============================================================================
+
+def run_video_processing(project_path: Path, cfg: dict) -> bool:
+    """
+    Run the full video preprocessing pipeline for a single project folder.
+
+    Args:
+        project_path: Path to the project directory (e.g. .../15-5-2024_#20_INDIVIDUAL_[15])
+        cfg:          Parsed config.yaml dict (yaml.safe_load output)
+
+    Returns:
+        True on success, False if the project was skipped or failed.
+    """
+    vc   = cfg["video_processing"]
+    trim = cfg.get("trim_times", {})
+    default_trim = cfg.get("default_trim", [0, None, 15])
+
+    project_name     = project_path.name
+    raw_video        = project_path / vc["raw_video_filename"]
+    processed_video  = project_path / "processed_video.mp4"
+
+    frames_dir = project_path / "Frames"
+    mask_dir   = project_path / "MaskDir"
+    poses_dir  = project_path / "PosesDir"
+    vis_dir    = project_path / "Visualizations"
+    log_file   = project_path / "processing_log.log"
+
+    for d in [frames_dir, mask_dir, poses_dir, vis_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+    log_file.write_text("=== Processing Log ===\n")
+
+    print(f"\n{'='*70}")
+    print(f"Video processing: {project_name}")
+    print(f"{'='*70}")
+
+    # --- Skip check ---
+    skip_flag = cfg["flags"].get("skip_video_processing", False)
+    if skip_flag and processed_video.exists():
+        print(f"  Skipping — processed_video.mp4 already exists.")
+        _log(log_file, f"[SKIPPED] Video processing: processed_video.mp4 exists")
+        return True
+
+    if not raw_video.exists():
+        print(f"  Raw video not found: {raw_video} — skipping project.")
+        _log(log_file, f"[SKIPPED] Raw video not found: {raw_video}")
+        return False
+
+    # --- Trim times ---
+    start_sec, end_sec, fps = trim.get(project_name, default_trim)
+
+    # --- Step 1: Trim and sample video ---
+    if frames_dir.exists() and any(frames_dir.iterdir()):
+        print(f"  Frames already exist — skipping frame extraction.")
+        _log(log_file, f"[SKIPPED] Frame extraction: {frames_dir} already populated")
     else:
-        log_to_file(f"[OK] Processed video exist: {processed_video}")
+        if not processed_video.exists():
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", str(raw_video),
+                "-ss", str(start_sec),
+                *([ "-to", str(end_sec) ] if end_sec is not None else []),
+                "-filter:v", f"fps={fps}",
+                str(processed_video)
+            ]
+            try:
+                _run_cmd(ffmpeg_cmd, "Trim and sample video", log_file)
+                _log(log_file, f"[OK] Processed video created: {processed_video}")
+            except Exception:
+                return False
+        else:
+            print("  Processed video already exists — skipping ffmpeg trim.")
+            _log(log_file, f"[OK] Processed video already exists: {processed_video}")
 
-# === Step 2: Run tracking inference ===
-tracking_cmd = [
-    "psifx", "video", "tracking", "samurai", "inference",
-    "--video", str(processed_video),
-    "--mask_dir", str(mask_dir),
-    "--model_size", "small",
-    "--yolo_model", yolo_model,
-    "--max_objects", "2",
-    "--step", "1",
-    "--device", "cuda",
-    "--overwrite"
-]
+    # --- Step 2: Tracking inference ---
+    try:
+        _run_cmd([
+            "psifx", "video", "tracking", "samurai", "inference",
+            "--video",       str(processed_video),
+            "--mask_dir",    str(mask_dir),
+            "--model_size",  vc["model_size"],
+            "--yolo_model",  vc["yolo_model"],
+            "--max_objects", str(vc["nb_objects"]),
+            "--step",        str(vc["step_size"]),
+            "--device",      vc["device"],
+            "--overwrite"
+        ], "Tracking inference", log_file)
+        _log(log_file, "[OK] Tracking inference completed")
+    except Exception:
+        return False
 
-run_cmd(tracking_cmd, "Tracking inference")
-log_to_file("[OK] Tracking inference completed successfully")
+    # --- Step 2b: Tracking visualization ---
+    vis_track = vis_dir / "visualization_tracking.mp4"
+    try:
+        _run_cmd([
+            "psifx", "video", "tracking", "visualization",
+            "--video",         str(processed_video),
+            "--masks",         str(mask_dir),
+            "--visualization", str(vis_track),
+            "--overwrite"
+        ], "Tracking visualization", log_file)
+        _log(log_file, "[OK] Tracking visualization completed")
+    except Exception as e:
+        print(f"  Warning: Tracking visualization failed: {e}")
+        _log(log_file, f"[WARNING] Tracking visualization failed: {e}")
 
-vis_track = vis_dir / "visualization_tracking.mp4"
-track_cmd = [
-    "psifx", "video", "tracking", "visualization",
-    "--video", str(processed_video),
-    "--masks", mask_dir,
-    "--visualization", str(vis_track),
-    "--overwrite"
-]
-run_cmd(track_cmd, "Tracking visualization")
-log_to_file("[OK] Tracking visualization completed successfully")
+    # --- Step 3: Pose inference ---
+    try:
+        _run_cmd([
+            "psifx", "video", "pose", "mediapipe", "multi-inference",
+            "--video",     str(processed_video),
+            "--masks",     str(mask_dir),
+            "--poses_dir", str(poses_dir),
+            "--device",    vc["device"],
+            "--overwrite"
+        ], "Pose inference", log_file)
+        _log(log_file, "[OK] Pose inference completed")
+    except Exception:
+        return False
 
-run_cmd([
-        "psifx", "video", "pose", "mediapipe", "multi-inference",
-        "--video", str(processed_video),
-        "--masks", mask_dir,
-        "--poses_dir", poses_dir,
-        "--device", "cuda",
-        "--overwrite"
-    ], "Pose inference")
+    # --- Step 3b: Pose visualization ---
+    vis_pose = vis_dir / "visualization_pose.mp4"
+    try:
+        _run_cmd([
+            "psifx", "video", "pose", "mediapipe", "visualization",
+            "--video",                str(processed_video),
+            "--poses",                str(poses_dir),
+            "--visualization",        str(vis_pose),
+            "--confidence_threshold", "0.0",
+            "--overwrite"
+        ], "Pose visualization", log_file)
+        _log(log_file, "[OK] Pose visualization completed")
+    except Exception as e:
+        print(f"  Warning: Pose visualization failed: {e}")
+        _log(log_file, f"[WARNING] Pose visualization failed: {e}")
 
-# === Step 3: Visualize pose ===
-vis_pose = vis_dir / "visualization_pose.mp4"
-pose_cmd = [
-    "psifx", "video", "pose", "mediapipe", "visualization",
-    "--video", str(processed_video),
-    "--poses", str(poses_dir),
-    "--visualization", str(vis_pose),
-    "--confidence_threshold", "0.0",
-    "--overwrite"
-]
+    # --- Step 4: Cleanup frames ---
+    try:
+        if frames_dir.exists():
+            shutil.rmtree(frames_dir)
+            print(f"  Cleaned up frames directory.")
+            _log(log_file, f"[OK] Cleaned up frames: {frames_dir}")
+    except Exception as e:
+        print(f"  Warning: Could not clean frames dir: {e}")
+        _log(log_file, f"[WARNING] Frames cleanup failed: {e}")
+
+    print(f"  Video processing complete. Results in: {project_path}")
+    print(f"  Log: {log_file}")
+    return True
 
 
+# =============================================================================
+# Standalone entry point
+# =============================================================================
 
-try:
-    run_cmd(pose_cmd, "Visualizing pose")
-    log_to_file("[OK] Pose visualization completed successfully")
-except Exception as e:
-    log_to_file(f"[WARNING] Pose visualization failed: {str(e)}")
+def main():
+    CONFIG_FILE = Path(__file__).parent.parent.parent / "config.yaml"
+    if not CONFIG_FILE.exists():
+        raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
 
-## === Step 4: Face feature extraction ===
-#face_cmd = [
-    #"psifx", "video", "face", "openface", "multi-inference",
-    #"--video", str(processed_video),
-    #"--masks", str(mask_dir),
-    #"--features_dir", str(faces_dir),
-    #"--device", device,
-    #"--overwrite"
-#]
+    with open(CONFIG_FILE, "r") as f:
+        cfg = yaml.safe_load(f)
 
-#try:
-    #run_cmd(face_cmd, "Face inference")
-    #log_to_file("[OK] Face inference completed successfully")
-#except Exception as e:
-    #log_to_file(f"[WARNING] Face inference failed: {str(e)}")
+    raw_video_root = Path(cfg["directories"]["raw_video_root"])
+    project_dirs   = [d for d in raw_video_root.iterdir() if d.is_dir()]
 
-## === Step 5: Visualize face features ===
-#vis_face = vis_dir / "visualization_face.mp4"
-#face_vis_cmd = [
-    #"psifx", "video", "face", "openface", "visualization",
-    #"--video", str(processed_video),
-    #"--features", str(faces_dir),
-    #"--visualization", str(vis_face),
-    #"--depth", "3.0",
-    #"--f_x", "1600.0", "--f_y", "1600.0",
-    #"--c_x", "960.0", "--c_y", "540.0",
-    #"--overwrite"
-#]
+    print(f"Found {len(project_dirs)} project directories in {raw_video_root}")
 
-#try:
-    #run_cmd(face_vis_cmd, "Visualizing face")
-    #log_to_file("[OK] Face visualization completed successfully")
-#except Exception as e:
-    #log_to_file(f"[WARNING] Face visualization failed: {str(e)}")
+    results = {}
+    for project_path in sorted(project_dirs):
+        success = run_video_processing(project_path, cfg)
+        results[project_path.name] = "OK" if success else "FAILED/SKIPPED"
 
-# === Step 6: Cleanup frames directory ===
-try:
-    if frames_dir.exists():
-        print(f"Cleaning up frames directory: {frames_dir}")
-        shutil.rmtree(frames_dir)
-        log_to_file(f"[OK] Cleaned up frames directory: {frames_dir}")
-except Exception as e:
-    log_to_file(f"[WARNING] Failed to clean up frames directory: {str(e)}")
+    print(f"\n{'='*70}")
+    print("VIDEO PROCESSING SUMMARY")
+    print(f"{'='*70}")
+    for name, status in results.items():
+        print(f"  {status:15s}  {name}")
 
-# === Final Summary ===
-print("\n==================== Processing Complete ====================")
-num_frames = len(list(frames_dir.glob("*.jpg"))) if frames_dir.exists() else 0
-#print(f"Total frames processed: {num_frames}")
-print(f"Results saved to: {base_path}")
-print(f"See {log_file_path} for details.")
+
+if __name__ == "__main__":
+    main()
