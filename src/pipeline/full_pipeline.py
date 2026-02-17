@@ -1,28 +1,19 @@
-# # src/pipeline/full_pipeline.py
-
-# from src.psifx.json_processor import load_json, save_parquet
-# from src.models.train import train_model
-# from src.annotations.generator import generate_annotations
-
-# def run_pipeline(video_file: str):
-#     df = load_json(video_file)
-#     df_processed = preprocess_pose(df)
-#     model = train_model(df_processed)
-#     annotations = generate_annotations(model, df_processed)
-#     return annotations
-
-# if __name__ == "__main__":
-#     video_file = "data/raw/video1.json"
-#     run_pipeline(video_file)
-
-===========================================================
-
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # coding: utf-8
+"""
+full_pipeline.py
+----------------
+End-to-end orchestrator for the Video Annotation System.
+Runs pose clustering, annotation alignment, data combination,
+sanitization, and model training across all projects.
+
+Configuration is loaded from config.yaml at the project root.
+"""
 
 
 
 import os
+import yaml
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -33,27 +24,29 @@ import importnb
 
 
 # =========================
-# Options
+# Load configuration
 # =========================
-SKIP_POSE_CLUSTERING = True          # Skip re-run if cached exists
-SKIP_ANNOTATION_PROCESSING = True    # Skip annotation alignment if combined file exists
-FORCE_RECOMBINE = False               # Force re-combining labeled datasets
-BASE_DATA_DIR = Path("/home/liubov/Bureau/new/processed_data")
-OUTPUT_BASE_DIR = Path("/home/liubov/Bureau/new/output_data")
-ANNOTATIONS_DIR = Path("/home/liubov/Bureau/new/new_annotations")
+CONFIG_FILE = Path(__file__).parent.parent.parent / "config.yaml"
+if not CONFIG_FILE.exists():
+    raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
+
+with open(CONFIG_FILE, "r") as f:
+    cfg = yaml.safe_load(f)
+
+# Directories
+BASE_DATA_DIR   = Path(cfg["directories"]["base_data_dir"])
+OUTPUT_BASE_DIR = Path(cfg["directories"]["output_base_dir"])
+ANNOTATIONS_DIR = Path(cfg["directories"]["annotations_dir"])
 OUTPUT_BASE_DIR.mkdir(exist_ok=True, parents=True)
 
-# =========================
+# Pipeline flags
+SKIP_POSE_CLUSTERING       = cfg["flags"]["skip_pose_clustering"]
+SKIP_ANNOTATION_PROCESSING = cfg["flags"]["skip_annotation_processing"]
+FORCE_RECOMBINE            = cfg["flags"]["force_recombine"]
+
 # Trimming parameters
-# =========================
-TRIM_TIMES = {
-    "11-1-2024_#9_INDIVIDUAL_[18]": (165, 1930, 15),
-    "23-5-2024_#20_INDIVIDUAL_[14]": (500, 2595, 15),
-    "14-3-2024_#15_INDIVIDUAL_[18]": (165, 1860, 15),
-    "11-1-2024_#7_INDIVIDUAL_[14]": (170, 2160, 15),
-    "10-1-2024_#6_INDIVIDUAL_[15]": (210, 2940, 15)
-}
-DEFAULT_TRIM = (0, None, 15)
+TRIM_TIMES   = {k: tuple(v) for k, v in cfg["trim_times"].items()}
+DEFAULT_TRIM = tuple(cfg["default_trim"])
 
 # =========================
 # Load submodules
