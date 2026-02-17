@@ -4,8 +4,15 @@
 full_pipeline.py
 ----------------
 End-to-end orchestrator for the Video Annotation System.
-Runs pose clustering, annotation alignment, data combination,
-sanitization, and model training across all projects.
+
+Pipeline stages (per project):
+  Step 1 — Video processing   (src/video_processing/processing.py)
+  Step 2 — Pose extraction    (src/pose/extractor.py)
+  Step 3 — Pose clustering    (src/pose/clustering.py)  [optional]
+  Step 4 — Annotation alignment (AnnotLabelGenerator)
+
+Followed by:
+  Combine labeled features → Data sanitization → Model training
 
 Configuration is loaded from config.yaml at the project root.
 """
@@ -21,11 +28,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import seaborn as sns
-import importnb
 
-# Add src root to path so processing.py can be imported
+# Add src root to path so submodules can be imported
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from video_processing.processing import run_video_processing
+from pose.extractor import run_pose_extraction
+from pose.clustering import run_pose_clustering
 
 
 # =========================
@@ -52,23 +60,6 @@ FORCE_RECOMBINE            = cfg["flags"]["force_recombine"]
 # Trimming parameters
 TRIM_TIMES   = {k: tuple(v) for k, v in cfg["trim_times"].items()}
 DEFAULT_TRIM = tuple(cfg["default_trim"])
-
-# =========================
-# Load submodules
-# =========================
-print("\n" + "="*70)
-print("Loading analysis modules...")
-print("="*70)
-
-with importnb.Notebook():
-    import PoseClustClassifier as pcc
-    import AnnotLabelGenerator as alg
-    import ModelTraining3 as mt
-
-# Note: The global style is already applied, so all plots in these modules
-# will automatically use the configured style
-
-print("✓ All modules loaded")
 
 # =========================
 # Project directories
@@ -100,6 +91,17 @@ for project_dir in project_dirs:
         print(f"  ⚠ Raw project folder not found at {raw_project_path} — skipping video processing step.")
 
     # -------------------------------
+    # Step 2: Pose extraction
+    # -------------------------------
+    if raw_project_path.exists():
+        success = run_pose_extraction(raw_project_path, cfg)
+        if not success:
+            print(f"  ✗ Pose extraction failed for {project_name}, skipping project.")
+            continue
+    else:
+        print(f"  ⚠ Raw project folder not found — skipping pose extraction step.")
+
+    # -------------------------------
     # Load pose data
     # -------------------------------
     parquet_files = list(project_dir.glob("processed_data__*.parquet"))
@@ -118,21 +120,26 @@ for project_dir in project_dirs:
         print(f"  ✓ Loaded existing CSV: {csv_path.name} ({len(df)} rows)")
 
     # -------------------------------
-    # Pose clustering
+    # Step 3: Pose clustering (optional)
     # -------------------------------
     pose_output_path = OUTPUT_DIR / f"pose_clusters_{project_name}.parquet"
-    if SKIP_POSE_CLUSTERING and pose_output_path.exists():
-        pose_results = {'data': pd.read_parquet(pose_output_path)}
-        print(f"  ✓ Using existing pose clustering: {pose_output_path.name}")
+    if SKIP_POSE_CLUSTERING:
+        print("  → Skipping pose clustering (flags.skip_pose_clustering: true).")
+    elif pose_output_path.exists():
+        print(f"  ✓ Using cached pose clustering: {pose_output_path.name}")
     else:
         print("  Running pose clustering...")
         try:
-            pose_results = pcc.run_pose_clustering(data_path=project_dir, output_dir=OUTPUT_DIR)
-            pose_results['data'].to_parquet(pose_output_path)
-            print(f"  ✓ Pose clustering completed and saved.")
+            pose_results = run_pose_clustering(
+                project_dir=project_dir,
+                output_dir=OUTPUT_DIR,
+                cfg=cfg,
+            )
+            pose_results["data"].to_parquet(pose_output_path)
+            print(f"  ✓ Pose clustering completed and cached.")
         except Exception as e:
             print(f"  ✗ Pose clustering failed: {e}")
-            continue
+            # Non-fatal — continue to annotation alignment
 
     # -------------------------------
     # Annotation alignment
