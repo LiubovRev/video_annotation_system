@@ -15,8 +15,8 @@ step_size = 1
 object_class = "0"
 device = "cuda"
 
-start_trim_sec = 140
-end_trim_sec = int(60*32)
+start_trim_sec = 0
+end_trim_sec = None
 
 base_path = Path("/home/liubov/Bureau/new/15-5-2024_#20_INDIVIDUAL_[15]")
 raw_video = base_path / "camera_a.mkv"
