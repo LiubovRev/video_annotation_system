@@ -13,6 +13,7 @@ Configuration is loaded from config.yaml at the project root.
 
 
 import os
+import sys
 import yaml
 import pandas as pd
 import numpy as np
@@ -21,6 +22,10 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import seaborn as sns
 import importnb
+
+# Add src root to path so processing.py can be imported
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from video_processing.processing import run_video_processing
 
 
 # =========================
@@ -80,6 +85,19 @@ for project_dir in project_dirs:
     OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
     print(f"\n▶ Processing project: {project_name}")
+
+    # -------------------------------
+    # Step 1: Video processing
+    # -------------------------------
+    raw_video_root = Path(cfg["directories"]["raw_video_root"])
+    raw_project_path = raw_video_root / project_name
+    if raw_project_path.exists():
+        success = run_video_processing(raw_project_path, cfg)
+        if not success:
+            print(f"  ✗ Video processing failed for {project_name}, skipping project.")
+            continue
+    else:
+        print(f"  ⚠ Raw project folder not found at {raw_project_path} — skipping video processing step.")
 
     # -------------------------------
     # Load pose data
