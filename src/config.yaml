@@ -20,12 +20,13 @@ directories:
 # -----------------------------------------------------------------------------
 flags:
   skip_video_processing:      false   # Skip Step 1 if processed_video.mp4 already exists
-  skip_pose_clustering:       true    # Skip re-running clustering if cached parquet exists
-  skip_annotation_processing: true    # Skip annotation alignment if combined file exists
+  skip_pose_extraction:       false   # Skip Step 2 if processed_data.csv already exists
+  skip_pose_clustering:       true    # Skip Step 3 if cached parquet exists
+  skip_annotation_processing: true    # Skip Step 4 if combined file exists
   force_recombine:            false   # Force re-combining all labeled datasets
 
 # -----------------------------------------------------------------------------
-# Video processing (Step 1 — processing.py)
+# Video processing (Step 1 — src/video_processing/processing.py)
 # -----------------------------------------------------------------------------
 video_processing:
   raw_video_filename: "camera_a.mkv"  # Expected filename inside each project folder
@@ -36,6 +37,17 @@ video_processing:
   model_size:         "small"
   object_class:       "0"
   device:             "cuda"
+
+# -----------------------------------------------------------------------------
+# Pose extraction (Step 2 — src/pose/extractor.py)
+# -----------------------------------------------------------------------------
+pose_extraction:
+  directory:    "PosesDir"             # Subfolder inside each project dir with .tar.gz files
+  abs_base:     0                      # Starting index offset for JSON renaming
+  fps:          15
+  id_to_label:                         # Maps tar filename prefix -> person label
+    "1": "Therapist1"
+    "2": "Patient1"
 
 # -----------------------------------------------------------------------------
 # Project trim times
