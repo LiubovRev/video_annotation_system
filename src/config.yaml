@@ -21,7 +21,7 @@ directories:
 flags:
   skip_video_processing:      false   # Skip Step 1 if processed_video.mp4 already exists
   skip_pose_extraction:       false   # Skip Step 2 if processed_data.csv already exists
-  skip_pose_clustering:       true    # Skip Step 3 if cached parquet exists
+  skip_pose_clustering:       true    # Skip Step 3 (optional) — set false to enable
   skip_annotation_processing: true    # Skip Step 4 if combined file exists
   force_recombine:            false   # Force re-combining all labeled datasets
 
@@ -48,6 +48,31 @@ pose_extraction:
   id_to_label:                         # Maps tar filename prefix -> person label
     "1": "Therapist1"
     "2": "Patient1"
+
+# -----------------------------------------------------------------------------
+# Pose clustering (optional Step 3 — src/pose/clustering.py)
+# Set flags.skip_pose_clustering: true to bypass this step entirely.
+# -----------------------------------------------------------------------------
+pose_clustering:
+  # Movement detection
+  movement_threshold:   10       # px/frame — above this = "moving"
+  # Proximity zones (pixels)
+  proximity_close:      200
+  proximity_medium:     400
+  # Approach-response window
+  response_window:      5        # seconds to check for child response after therapist approach
+  # Data preprocessing
+  confidence_threshold: 0.5
+  smooth_window:        11
+  smooth_poly:          3
+  # Clustering k search range [start, stop] (exclusive stop, step 1)
+  k_range:              [2, 8]
+  # Session phase detection
+  phase_window:         30       # seconds per window
+  n_phases:             4
+  # Person labels (must match person_label values in processed_data.csv)
+  therapist_label:      "Therapist"
+  child_label:          "Child"
 
 # -----------------------------------------------------------------------------
 # Project trim times
