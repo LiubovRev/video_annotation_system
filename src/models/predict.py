@@ -1,289 +1,282 @@
 #!/usr/bin/env python3
 # coding: utf-8
 """
---------------------------------
-Loads a trained XGBoost model and runs it on new pose keypoint data
-to predict annotation labels. Optionally generates a performance report
-and confusion matrix if true labels are present in the data.
+predict.py
+----------
+Final step of the Video Annotation Pipeline.
+Loads a trained model and runs it on new pose keypoint data
+to predict annotation labels.
+
+Feature engineering is identical to training (normalize → derived → temporal).
+
+Outputs saved to output_dir:
+  predictions_<stem>.csv          — input data + predicted_annotation_label
+  prediction_report_<stem>.txt    — accuracy + classification report (if true labels present)
+  confusion_matrix_<stem>.png     — heatmap (if true labels present)
+
+Can be run standalone or called by full_pipeline.py via
+  predict_annotations(data_path, output_dir, cfg).
+
+Configuration loaded from config.yaml at the project root.
 """
 
-import os
 import json
+from pathlib import Path
+
 import joblib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+import yaml
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+# Re-use feature engineering from train.py (same package directory)
+from models.train import (
+    normalize_keypoints,
+    add_derived_pose_features,
+    add_temporal_features,
+)
 
 
 # =============================================================================
-# Configuration — edit these paths before running
-# =============================================================================
-BASE_DATA_DIR   = Path("/home/liubov/Bureau/new/processed_data")
-OUTPUT_BASE_DIR = Path("/home/liubov/Bureau/new/output_data")
-MODEL_FILE      = OUTPUT_BASE_DIR / "model_xgboost.joblib"
-FEATURES_FILE   = OUTPUT_BASE_DIR / "feature_names.json"
-
-# Path to the new data CSV for prediction
-NEW_DATA_FILE   = BASE_DATA_DIR / "processed_data14-3-2024_#15_INDIVIDUAL_[18].csv"
-
-# Label mapping (numeric -> string)
-LABEL_MAP = {
-    0: 'C', 1: 'CCR', 2: 'CHO', 3: 'CSI', 4: 'CST',
-    5: 'T', 6: 'TC',  7: 'TRE', 8: 'TSI', 9: 'TST',
-}
-
-FPS = 15
-
-
-# =============================================================================
-# Feature engineering functions
+# Core prediction function
 # =============================================================================
 
-def normalize_keypoints(df, keypoints):
-    """Normalize keypoints relative to torso length."""
-    df['torso_length'] = np.sqrt(
-        (df['neck_x'] - df['mid_hip_x'])**2 +
-        (df['neck_y'] - df['mid_hip_y'])**2
-    )
-    df['torso_length'] = df['torso_length'].replace(0, np.nan)
-    median_torso = df['torso_length'].median()
-    df['torso_length'] = df['torso_length'].fillna(median_torso).clip(lower=1e-3)
-
-    for col in keypoints:
-        if '_x' in col:
-            df[col] = (df[col] - df['mid_hip_x']) / df['torso_length']
-        else:
-            df[col] = (df[col] - df['mid_hip_y']) / df['torso_length']
-
-    return df
-
-
-def add_derived_pose_features(df):
-    """Add joint angles, distances, and symmetry features."""
-
-    def compute_angle(a, b, c):
-        """Angle at point b formed by points a-b-c (degrees)."""
-        ba = a - b
-        bc = c - b
-        cosine = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-8)
-        return np.arccos(np.clip(cosine, -1.0, 1.0)) * (180.0 / np.pi)
-
-    def compute_distance(p1, p2):
-        """Euclidean distance between two 2-D points."""
-        return np.linalg.norm(p1 - p2)
-
-    # --- Joint angles ---
-    angle_defs = {
-        'r_elbow_angle':     ('r_shoulder', 'r_elbow',    'r_wrist'),
-        'l_elbow_angle':     ('l_shoulder', 'l_elbow',    'l_wrist'),
-        'r_shoulder_angle':  ('neck',       'r_shoulder', 'r_elbow'),
-        'l_shoulder_angle':  ('neck',       'l_shoulder', 'l_elbow'),
-        'r_knee_angle':      ('r_hip',      'r_knee',     'r_ankle'),
-        'l_knee_angle':      ('l_hip',      'l_knee',     'l_ankle'),
-        'r_hip_angle':       ('mid_hip',    'r_hip',      'r_knee'),
-        'l_hip_angle':       ('mid_hip',    'l_hip',      'l_knee'),
-        'trunk_angle':       ('nose',       'neck',       'mid_hip'),
-    }
-    for col, (a, b, c) in angle_defs.items():
-        df[col] = df.apply(lambda row: compute_angle(
-            np.array([row[f'{a}_x'], row[f'{a}_y']]),
-            np.array([row[f'{b}_x'], row[f'{b}_y']]),
-            np.array([row[f'{c}_x'], row[f'{c}_y']]),
-        ), axis=1)
-
-    # --- Distances ---
-    df['eye_to_eye'] = df.apply(lambda row: compute_distance(
-        np.array([row['l_eye_x'], row['l_eye_y']]),
-        np.array([row['r_eye_x'], row['r_eye_y']])), axis=1)
-
-    df['nose_to_neck'] = df.apply(lambda row: compute_distance(
-        np.array([row['nose_x'], row['nose_y']]),
-        np.array([row['neck_x'], row['neck_y']])), axis=1)
-
-    df['r_wrist_to_hip'] = df.apply(lambda row: compute_distance(
-        np.array([row['r_wrist_x'], row['r_wrist_y']]),
-        np.array([row['mid_hip_x'], row['mid_hip_y']])), axis=1)
-
-    df['l_wrist_to_hip'] = df.apply(lambda row: compute_distance(
-        np.array([row['l_wrist_x'], row['l_wrist_y']]),
-        np.array([row['mid_hip_x'], row['mid_hip_y']])), axis=1)
-
-    df['r_wrist_to_nose'] = df.apply(lambda row: compute_distance(
-        np.array([row['r_wrist_x'], row['r_wrist_y']]),
-        np.array([row['nose_x'], row['nose_y']])), axis=1)
-
-    df['l_wrist_to_nose'] = df.apply(lambda row: compute_distance(
-        np.array([row['l_wrist_x'], row['l_wrist_y']]),
-        np.array([row['nose_x'], row['nose_y']])), axis=1)
-
-    df['nose_to_ankles'] = df.apply(lambda row: (
-        compute_distance(np.array([row['nose_x'], row['nose_y']]),
-                         np.array([row['l_ankle_x'], row['l_ankle_y']])) +
-        compute_distance(np.array([row['nose_x'], row['nose_y']]),
-                         np.array([row['r_ankle_x'], row['r_ankle_y']]))
-    ) / 2, axis=1)
-
-    df['hip_to_ankle'] = df.apply(lambda row: (
-        compute_distance(np.array([row['mid_hip_x'], row['mid_hip_y']]),
-                         np.array([row['l_ankle_x'], row['l_ankle_y']])) +
-        compute_distance(np.array([row['mid_hip_x'], row['mid_hip_y']]),
-                         np.array([row['r_ankle_x'], row['r_ankle_y']]))
-    ) / 2, axis=1)
-
-    # --- Symmetry features ---
-    df['shoulder_y_diff']     = df['l_shoulder_y']    - df['r_shoulder_y']
-    df['hip_y_diff']          = df['l_hip_y']          - df['r_hip_y']
-    df['elbow_angle_diff']    = df['l_elbow_angle']    - df['r_elbow_angle']
-    df['knee_angle_diff']     = df['l_knee_angle']     - df['r_knee_angle']
-    df['wrist_to_hip_diff']   = df['l_wrist_to_hip']   - df['r_wrist_to_hip']
-    df['shoulder_angle_diff'] = df['l_shoulder_angle'] - df['r_shoulder_angle']
-
-    df['com_x'] = (df['mid_hip_x'] + df['neck_x']) / 2
-    df['com_y'] = (df['mid_hip_y'] + df['neck_y']) / 2
-
-    df['body_spread_x'] = (df[['l_wrist_x', 'r_wrist_x', 'l_ankle_x', 'r_ankle_x']].max(axis=1) -
-                           df[['l_wrist_x', 'r_wrist_x', 'l_ankle_x', 'r_ankle_x']].min(axis=1))
-    df['body_spread_y'] = (df[['nose_y', 'l_ankle_y', 'r_ankle_y']].max(axis=1) -
-                           df[['nose_y', 'l_ankle_y', 'r_ankle_y']].min(axis=1))
-
-    return df
-
-
-def add_temporal_features(df, keypoints, fps=15):
+def predict_annotations(data_path, output_dir, cfg=None):
     """
-    Compute velocity and acceleration for selected keypoints.
+    Run inference on a processed_data.csv (or similar) file.
 
-    Velocity     = delta_position / delta_time  (units/second)
-    Acceleration = delta_velocity  / delta_time  (units/second^2)
+    Args:
+        data_path:  Path to the input CSV (pose features, no annotation required).
+        output_dir: Where to save prediction outputs.
+        cfg:        Parsed config.yaml dict (optional).
 
-    NaNs are kept intact for proper downstream imputation.
+    Returns:
+        DataFrame with original columns plus 'predicted_annotation_label'.
     """
-    df = df.sort_values(by=['person_label', 'time_s']).reset_index(drop=True)
+    mc         = (cfg or {}).get("model", {})
+    output_dir_cfg = (cfg or {}).get("directories", {}).get("output_base_dir", ".")
+    fps        = mc.get("fps", 15)
+    model_file = mc.get("file", "model_xgboost.joblib")
+    feat_file  = mc.get("features_file", "feature_names.json")
+    label_map  = {int(k): v for k, v in ((cfg or {}).get("label_map") or {}).items()}
+    dpi        = (cfg or {}).get("plotting", {}).get("dpi", 300)
 
-    df['delta_time'] = df.groupby('person_label')['time_s'].diff()
-    df['delta_time'] = df['delta_time'].fillna(1 / fps).clip(lower=0.001)
+    output_dir     = Path(output_dir)
+    model_base_dir = Path(output_dir_cfg)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    selected_keypoints = [
-        'com_x', 'com_y',
-        'nose_x', 'nose_y',
-        'l_wrist_x', 'l_wrist_y', 'r_wrist_x', 'r_wrist_y',
-        'l_ankle_x', 'l_ankle_y', 'r_ankle_x', 'r_ankle_y',
-        'neck_x', 'neck_y',
-        'mid_hip_x', 'mid_hip_y',
-    ]
+    # --- Locate model ---
+    model_path = model_base_dir / model_file
+    if not model_path.exists():
+        # search for any .joblib in output dir
+        candidates = list(model_base_dir.glob("model_*.joblib"))
+        if not candidates:
+            raise FileNotFoundError(
+                f"No model file found in {model_base_dir}. "
+                "Run model training (Step 5) first.")
+        model_path = sorted(candidates)[-1]
+        print(f"  Using model: {model_path.name}")
+    model = joblib.load(model_path)
+    print(f"  Loaded model: {model_path.name}")
 
-    temporal_cols = []
-    for col in selected_keypoints:
-        if col not in df.columns:
-            continue
-
-        vel_col = f'{col}_vel'
-        df[vel_col] = df.groupby('person_label')[col].diff() / df['delta_time']
-
-        acc_col = f'{col}_acc'
-        df[acc_col] = df.groupby('person_label')[vel_col].diff() / df['delta_time']
-
-        temporal_cols.extend([vel_col, acc_col])
-
-    for col in temporal_cols:
-        df[col] = df[col].replace([np.inf, -np.inf], np.nan)
-
-    n = len(temporal_cols) // 2
-    print(f"  Added {len(temporal_cols)} temporal features ({n} velocity + {n} acceleration)")
-    return df, temporal_cols
-
-
-# =============================================================================
-# Main pipeline
-# =============================================================================
-
-def main():
-    OUTPUT_BASE_DIR.mkdir(exist_ok=True, parents=True)
-
-    # --- Load model ---
-    if not MODEL_FILE.exists():
-        raise FileNotFoundError(f"Model file not found: {MODEL_FILE}")
-    model = joblib.load(MODEL_FILE)
-    print(f"Loaded model from {MODEL_FILE.name}")
-
-    # --- Load feature names ---
-    if not FEATURES_FILE.exists():
-        raise FileNotFoundError(f"Feature file not found: {FEATURES_FILE}")
-    with open(FEATURES_FILE, 'r') as f:
+    # --- Locate feature names ---
+    feat_path = model_base_dir / feat_file
+    if not feat_path.exists():
+        raise FileNotFoundError(f"feature_names.json not found at {feat_path}")
+    with open(feat_path) as f:
         feature_names = json.load(f)
-    print(f"Loaded {len(feature_names)} feature names")
+    print(f"  Feature names: {len(feature_names)} features")
 
-    # --- Load new data ---
-    if not NEW_DATA_FILE.exists():
-        raise FileNotFoundError(f"Data file not found: {NEW_DATA_FILE}")
-    data = pd.read_csv(NEW_DATA_FILE)
-    print(f"Loaded data: {NEW_DATA_FILE.name} ({len(data)} rows)")
+    # --- Load data ---
+    data_path = Path(data_path)
+    data = pd.read_csv(data_path)
+    print(f"  Input data: {data_path.name} ({len(data):,} rows)")
 
     # --- Feature engineering ---
     print("\n--- Feature Engineering ---")
-    keypoints = [col for col in data.columns if '_x' in col or '_y' in col]
+    df       = data.copy()
+    keypoints = [c for c in df.columns if "_x" in c or "_y" in c]
     print(f"  Found {len(keypoints)} keypoint columns")
 
-    df = normalize_keypoints(data.copy(), keypoints)
+    df = normalize_keypoints(df, keypoints)
     df = add_derived_pose_features(df)
-    df, _ = add_temporal_features(df, keypoints, fps=FPS)
-    df['person_Child'] = (df['person_label'] == 'Child').astype(int)
 
-    # --- Validate features ---
-    missing_cols = [f for f in feature_names if f not in df.columns]
-    if missing_cols:
-        raise ValueError(f"Missing required features: {missing_cols}")
-    X = df[feature_names]
+    # Use person_label as group_col for inference (annotation_label not available)
+    group_col = "person_label" if "person_label" in df.columns else None
+    if group_col:
+        df, _ = add_temporal_features(df, group_col=group_col, fps=fps)
+    else:
+        # Create a dummy group so temporal features are still computed
+        df["_group"] = "all"
+        df, _ = add_temporal_features(df, group_col="_group", fps=fps)
+        df = df.drop(columns=["_group"])
+
+    # person_label dummies (must match training encoding)
+    if "person_label" in df.columns:
+        df = pd.get_dummies(df, columns=["person_label"], prefix="person")
+
+    # --- Align to training feature set ---
+    missing = [f for f in feature_names if f not in df.columns]
+    extra   = [c for c in df.columns if c not in feature_names]
+    if missing:
+        print(f"  ⚠ {len(missing)} features missing — filling with 0: {missing[:5]}...")
+        for col in missing:
+            df[col] = 0.0
+    if extra:
+        df = df.drop(columns=[c for c in extra if c in df.columns and c not in feature_names])
+
+    X = df[feature_names].copy()
+
+    # --- Impute ---
+    nan_count = X.isnull().sum().sum()
+    if nan_count > 0:
+        imputer = SimpleImputer(strategy="median")
+        X       = pd.DataFrame(imputer.fit_transform(X), columns=feature_names)
+        print(f"  Imputed {nan_count:,} missing values")
+
+    X = X.replace([np.inf, -np.inf], 0.0)
 
     # --- Predict ---
     print("\n--- Predicting ---")
     predictions = model.predict(X)
-    data['predicted_annotation_label'] = predictions
+    data = data.iloc[:len(X)].copy().reset_index(drop=True)
+    data["predicted_annotation_label"] = predictions
 
-    # Map numeric predictions to string labels if applicable
-    if all(isinstance(p, (int, np.integer)) for p in predictions):
-        data['predicted_annotation_label_str'] = data['predicted_annotation_label'].map(LABEL_MAP)
+    # Map numeric to string labels if applicable
+    if label_map and all(isinstance(p, (int, np.integer)) for p in predictions):
+        data["predicted_annotation_label_str"] = (
+            data["predicted_annotation_label"].map(label_map)
+        )
 
-    predictions_file = OUTPUT_BASE_DIR / f"predictions_{NEW_DATA_FILE.stem}.csv"
-    data.to_csv(predictions_file, index=False)
-    print(f"Predictions saved to: {predictions_file}")
-    print(f"\nPrediction counts:\n{data['predicted_annotation_label'].value_counts().to_string()}")
+    stem = data_path.stem
+    pred_file = output_dir / f"predictions_{stem}.csv"
+    data.to_csv(pred_file, index=False)
+    print(f"  Predictions saved: {pred_file.name}")
+    print(f"\nPrediction distribution:\n"
+          f"{data['predicted_annotation_label'].value_counts().to_string()}")
 
-    # --- Optional performance report (requires true labels in CSV) ---
-    if 'annotation_label' in data.columns:
-        y_true = data['annotation_label']
-        y_pred = predictions
-        labels  = np.unique(y_true)
+    # --- Optional performance report ---
+    if "annotation_label" in data.columns:
+        print("\n--- Performance Report ---")
+        y_true  = data["annotation_label"]
+        y_pred  = predictions
+        labels  = sorted(y_true.unique())
+        acc     = accuracy_score(y_true, y_pred)
+        report  = classification_report(y_true, y_pred, digits=4)
+        cm      = confusion_matrix(y_true, y_pred, labels=labels)
 
-        accuracy = accuracy_score(y_true, y_pred)
-        report   = classification_report(y_true, y_pred, digits=4)
-        cm       = confusion_matrix(y_true, y_pred)
-
-        report_file = OUTPUT_BASE_DIR / f"prediction_report_{NEW_DATA_FILE.stem}.txt"
-        with open(report_file, 'w') as f:
-            f.write(f"Accuracy: {accuracy:.4f}\n\n")
+        report_file = output_dir / f"prediction_report_{stem}.txt"
+        with open(report_file, "w") as f:
+            f.write(f"Accuracy: {acc:.4f}\n\n")
             f.write("Classification Report:\n")
             f.write(report)
-        print(f"\nAccuracy: {accuracy:.4f}")
-        print(f"Performance report saved to: {report_file}")
+        print(f"  Accuracy: {acc:.4f}")
+        print(f"  Report saved: {report_file.name}")
 
-        plt.figure(figsize=(12, 10))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='viridis',
-                    xticklabels=labels, yticklabels=labels)
-        plt.title("Confusion Matrix", fontsize=20, weight='bold')
-        plt.xlabel("Predicted Label", fontsize=16, weight='bold')
-        plt.ylabel("True Label", fontsize=16, weight='bold')
+        fig, ax = plt.subplots(figsize=(12, 10))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="viridis",
+                    xticklabels=labels, yticklabels=labels, ax=ax)
+        ax.set_title("Confusion Matrix", fontsize=20, weight="bold")
+        ax.set_xlabel("Predicted Label", fontsize=16, weight="bold")
+        ax.set_ylabel("True Label",      fontsize=16, weight="bold")
         plt.tight_layout()
-        cm_file = OUTPUT_BASE_DIR / f"confusion_matrix_{NEW_DATA_FILE.stem}.png"
-        plt.savefig(cm_file, dpi=300, bbox_inches='tight', facecolor='white')
+        cm_file = output_dir / f"confusion_matrix_{stem}.png"
+        plt.savefig(cm_file, dpi=dpi, bbox_inches="tight", facecolor="white")
         plt.close()
-        print(f"Confusion matrix saved to: {cm_file}")
-
+        print(f"  Confusion matrix saved: {cm_file.name}")
     else:
-        print("No true labels found in CSV - skipping performance report.")
+        print("\n  No true labels found — skipping performance report.")
+
+    return data
+
+
+# =============================================================================
+# Batch prediction across all projects
+# =============================================================================
+
+def run_batch_predictions(cfg: dict) -> dict:
+    """
+    Predict annotations for every project that has a processed_data.csv
+    but no predictions file yet.
+
+    Args:
+        cfg: Parsed config.yaml dict.
+
+    Returns:
+        dict mapping project_name -> result DataFrame or error string.
+    """
+    raw_root    = Path(cfg["directories"]["raw_video_root"])
+    output_base = Path(cfg["directories"]["output_base_dir"])
+    ec          = cfg.get("pose_extraction", {})
+    directory   = ec.get("directory", "PosesDir")
+
+    project_dirs = [d for d in raw_root.iterdir() if d.is_dir()]
+    print(f"Found {len(project_dirs)} project directories for batch prediction.")
+
+    results = {}
+    for project_dir in sorted(project_dirs):
+        name       = project_dir.name
+        data_path  = project_dir / directory / "processed_data.csv"
+        output_dir = output_base / name
+
+        if not data_path.exists():
+            print(f"  Skipping {name} — no processed_data.csv")
+            results[name] = "skipped"
+            continue
+
+        pred_file = output_dir / f"predictions_processed_data.csv"
+        if pred_file.exists():
+            print(f"  Skipping {name} — predictions already exist")
+            results[name] = "cached"
+            continue
+
+        print(f"\n{'='*70}\nPredicting: {name}\n{'='*70}")
+        try:
+            df_pred     = predict_annotations(data_path, output_dir, cfg)
+            results[name] = df_pred
+        except Exception as e:
+            print(f"  ✗ Failed: {e}")
+            results[name] = f"error: {e}"
+
+    return results
+
+
+# =============================================================================
+# Standalone entry point
+# =============================================================================
+
+def main():
+    CONFIG_FILE = Path(__file__).parent.parent.parent / "config.yaml"
+    if not CONFIG_FILE.exists():
+        raise FileNotFoundError(f"Config not found: {CONFIG_FILE}")
+    with open(CONFIG_FILE) as f:
+        cfg = yaml.safe_load(f)
+
+    mc          = cfg.get("model", {})
+    output_base = Path(cfg["directories"]["output_base_dir"])
+    base_data   = Path(cfg["directories"]["base_data_dir"])
+    raw_root    = Path(cfg["directories"]["raw_video_root"])
+    directory   = cfg.get("pose_extraction", {}).get("directory", "PosesDir")
+
+    # Single-project mode if predict.data_path is set in config
+    predict_cfg = cfg.get("predict", {})
+    data_path   = predict_cfg.get("data_path")
+
+    if data_path:
+        project_name = Path(data_path).parent.parent.name
+        output_dir   = output_base / project_name
+        result       = predict_annotations(data_path, output_dir, cfg)
+        print(f"\n✓ Done. {len(result):,} rows predicted.")
+    else:
+        # Batch mode
+        results = run_batch_predictions(cfg)
+        print(f"\n{'='*70}\nBATCH PREDICTION SUMMARY\n{'='*70}")
+        for name, status in results.items():
+            label = "OK" if isinstance(status, pd.DataFrame) else str(status)
+            print(f"  {label:15s}  {name}")
 
 
 if __name__ == "__main__":
