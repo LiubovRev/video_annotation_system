@@ -25,8 +25,9 @@ video_annotation_system/
 ├── requirements.txt
 │
 ├── src/
-│   ├── psifx/                  # Video preprocessing
-│   │   ├── __init__.py
+│   ├── psifx/                  # psifx
+│   │   
+│   ├── video_processing        # Video Processing
 │   │   └── processing.py
 │   │
 │   ├── pose/                   # Pose extraction and clustering
