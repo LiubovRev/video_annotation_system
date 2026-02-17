@@ -9,7 +9,7 @@ Pipeline stages (per project):
   Step 1 — Video processing   (src/video_processing/processing.py)
   Step 2 — Pose extraction    (src/pose/extractor.py)
   Step 3 — Pose clustering    (src/pose/clustering.py)  [optional]
-  Step 4 — Annotation alignment (AnnotLabelGenerator)
+  Step 4 — Annotation alignment (src/annotations/generator.py)
 
 Followed by:
   Combine labeled features → Data sanitization → Model training
@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from video_processing.processing import run_video_processing
 from pose.extractor import run_pose_extraction
 from pose.clustering import run_pose_clustering
+from annotations.generator import run_annotation_alignment
 
 
 # =========================
@@ -142,85 +143,15 @@ for project_dir in project_dirs:
             # Non-fatal — continue to annotation alignment
 
     # -------------------------------
-    # Annotation alignment
+    # Step 4: Annotation alignment
     # -------------------------------
     if SKIP_ANNOTATION_PROCESSING:
-        print("  → Skipping annotation processing per flag.")
+        print("  → Skipping annotation alignment (flags.skip_annotation_processing: true).")
         continue
 
-    annotation_files = list(ANNOTATIONS_DIR.glob(f"{project_name.split('[')[0]}*.txt"))
-    if not annotation_files:
-        print(f"  ⚠ No annotation file found, skipping label generation...")
-        continue
-
-    annotation_file = annotation_files[0]
-    print(f"  ✓ Using annotation file: {annotation_file.name}")
-    start_trim, end_trim, fps = TRIM_TIMES.get(project_name, DEFAULT_TRIM)
-
-    try:
-        labeled_df = alg.run_annotation_alignment_pipeline(
-            annotation_file_path=annotation_file,
-            features_file_path=csv_path,
-            start_trim_sec=start_trim,
-            end_trim_sec=end_trim
-        )
-
-        output_path = OUTPUT_DIR / "labeled_features.csv"
-        labeled_df.to_csv(output_path, index=False)
-        print(f"  ✓ Labeled features saved: {output_path.name}")
-
-        # Plot annotation distribution with A0 POSTER styling
-        try:
-            label_counts = labeled_df['annotation_label'].value_counts().sort_values(ascending=False)
-            
-            # A0 poster sizing
-            fig, ax = plt.subplots(figsize=(18, 10))
-            
-            # Create viridis colors for bars
-            n_bars = len(label_counts)
-            colors = plt.cm.viridis(np.linspace(0.2, 0.9, n_bars))
-            
-            bars = ax.bar(range(n_bars), label_counts.values, 
-                         color=colors, edgecolor='black', linewidth=2, alpha=0.85)
-            
-            ax.set_title(f"Annotation Distribution: {project_name}", 
-                        fontsize=36, weight='bold', pad=20)
-            ax.set_xlabel("Annotation Label", fontsize=32, weight='bold')
-            ax.set_ylabel("Count", fontsize=32, weight='bold')
-            
-            # Set x-tick labels HORIZONTALLY
-            ax.set_xticks(range(n_bars))
-            ax.set_xticklabels(label_counts.index, fontsize=28, rotation=0)
-            ax.tick_params(axis='y', labelsize=28)
-            
-            # Add count labels on bars
-            for i, (bar, count) in enumerate(zip(bars, label_counts.values)):
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'{count:,}',
-                       ha='center', va='bottom', fontsize=24, weight='bold')
-            
-            ax.grid(True, alpha=0.3, axis='y', linewidth=1.5)
-            plt.tight_layout()
-            
-            plot_path = OUTPUT_DIR / f"annotation_stats_{project_name}.png"
-            plt.savefig(plot_path, dpi=300, bbox_inches='tight', facecolor='white')
-            plt.close()
-            
-            print(f"  ✓ Saved annotation distribution plot: {plot_path.name}")
-            
-            # Print statistics
-            print(f"  📊 Annotation statistics:")
-            print(f"    - Total labeled frames: {len(labeled_df)}")
-            print(f"    - Unique classes: {labeled_df['annotation_label'].nunique()}")
-            print(f"    - Top 5 classes:")
-            print(labeled_df['annotation_label'].value_counts().head(5).to_string())
-            
-        except Exception as e:
-            print(f"  ⚠ Failed to plot annotation stats: {e}")
-
-    except Exception as e:
-        print(f"  ✗ Annotation alignment failed: {e}")
+    labeled_df = run_annotation_alignment(project_name, cfg, OUTPUT_DIR)
+    if labeled_df is None:
+        print(f"  ✗ Annotation alignment failed for {project_name}, skipping project.")
         continue
 
 # =========================
