@@ -109,6 +109,13 @@ video_annotation_system/
 │
 ├── models/                      # Trained model artifacts
 ├── outputs/                     # Plots, reports, predictions
+│   ├── model_<name>.joblib
+│   ├── feature_names.json
+│   ├── model_metrics.json
+│   ├── model_comparison.png
+│   ├── feature_importance.png
+│   └── model_training_summary.txt
+│
 ├── requirements.txt
 └── README.md
 ```
