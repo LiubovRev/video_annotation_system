@@ -40,6 +40,7 @@ from models.train import train_model
 from models.predict import predict_annotations
 
 
+
 # =========================
 # Load configuration
 # =========================
@@ -49,10 +50,12 @@ if not CONFIG_FILE.exists():
 
 with open(CONFIG_FILE, "r") as f:
     cfg = yaml.safe_load(f)
+    raw_root = os.getenv("RAW_VIDEO_ROOT", cfg['directories']['raw_video_root'])
+
 
 # Directories
-BASE_DATA_DIR   = Path(cfg["directories"]["base_data_dir"])
-OUTPUT_BASE_DIR = Path(cfg["directories"]["output_base_dir"])
+BASE_DATA_DIR   = Path(cfg["directories"]["processed_data_dir"])
+OUTPUT_BASE_DIR = Path(cfg["directories"]["output_dir"])
 ANNOTATIONS_DIR = Path(cfg["directories"]["annotations_dir"])
 OUTPUT_BASE_DIR.mkdir(exist_ok=True, parents=True)
 

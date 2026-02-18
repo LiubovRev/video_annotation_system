@@ -1,5 +1,13 @@
 # Video Annotation System
 
+[![Python Version](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Build](https://github.com/LiubovRev/video_annotation_system/actions/workflows/main.yml/badge.svg)](https://github.com/LiubovRev/video_annotation_system/actions)
+[![Stars](https://img.shields.io/github/stars/LiubovRev/video_annotation_system)](https://github.com/LiubovRev/video_annotation_system/stargazers)
+
+**A modular, config-driven pipeline for video preprocessing, pose extraction, annotation alignment, clustering, and ML-based behavior prediction.**
+
+
 ## Overview
 
 This project implements a **modular, config‑driven pipeline** for video processing, pose extraction, optional clustering, annotation alignment, and machine‑learning‑based behavior classification.
@@ -153,21 +161,12 @@ Stores trim times and metadata.
 
 ## Usage
 
+
 ### Run the full pipeline
 
 ```bash
 python src/pipeline/full_pipeline.py
 ```
-
-This processes **all projects** under `data/raw/` and produces:
-
-- trimmed videos  
-- pose data  
-- optional clustering  
-- aligned annotations  
-- combined datasets  
-- trained model  
-- visual outputs  
 
 ---
 
@@ -257,6 +256,32 @@ Modes:
 
 ---
 
+## Example Output
+
+```bash
+outputs/
+├── plots/
+│   ├── movement_speed.png
+│   └── cluster_distribution_Therapist.png
+├── reports/
+│   └── annotation_stats_project_01.png
+data/processed/project_01/
+├── processed_data.csv
+├── labeled_features.csv
+└── PoseDir/
+    └── *.tar.gz
+```
+
+## Automated Tests & Config Validation
+
+Run via:
+
+```bash
+pytest tests/
+```
+
+---
+
 ## Tips
 
 - **Auto‑trim from annotation:** pipeline uses first/last annotated event ± buffer  
@@ -282,6 +307,4 @@ Modes:
 
 See `requirements.txt` for the full list.
 
----
 
-If you want, I can also turn this into a polished **README.md**, add badges, or generate diagrams for the pipeline.

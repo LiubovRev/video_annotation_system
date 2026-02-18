@@ -13,11 +13,12 @@
 # Directories
 # -----------------------------------------------------------------------------
 directories:
-  raw_video_root:     "data/raw"
-  processed_dir:      "data/processed"
-  annotations_dir:    "data/annotations"
-  output_dir:         "outputs"
-  models_dir:         "models"
+  raw_video_root: "data/raw"
+  processed_data_dir: "data/processed"
+  annotations_dir: "data/annotations"
+  output_dir: "outputs"
+  models_dir: "models"
+
 
 # -----------------------------------------------------------------------------
 # Pipeline Flags
