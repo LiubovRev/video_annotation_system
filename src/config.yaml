@@ -1,112 +1,94 @@
+
+---
+
+# 2️⃣ `config.yaml` (Best-Practice Version)
+
+```yaml
 # =============================================================================
 # config.yaml
-# Full Pipeline Configuration
-# Edit this file to configure paths, flags, and project parameters.
+# Video Annotation System - Central Configuration
 # =============================================================================
 
 # -----------------------------------------------------------------------------
 # Directories
 # -----------------------------------------------------------------------------
 directories:
-  base_data_dir:      "/home/liubov/Bureau/new/processed_data"
-  output_base_dir:    "/home/liubov/Bureau/new/output_data"
-  annotations_dir:    "/home/liubov/Bureau/new/new_annotations"
-  # Raw video projects root — each subfolder is one project
-  raw_video_root:     "/home/liubov/Bureau/new"
+  raw_video_root:     "data/raw"
+  processed_dir:      "data/processed"
+  annotations_dir:    "data/annotations"
+  output_dir:         "outputs"
+  models_dir:         "models"
 
 # -----------------------------------------------------------------------------
-# Pipeline flags
-# Set to true to skip a stage if its output already exists (speeds up reruns).
+# Pipeline Flags
 # -----------------------------------------------------------------------------
 flags:
-  skip_video_processing:      false   # Skip Step 1 if processed_video.mp4 already exists
-  skip_pose_extraction:       false   # Skip Step 2 if processed_data.csv already exists
-  skip_pose_clustering:       true    # Skip Step 3 (optional) — set false to enable
-  skip_annotation_processing: true    # Skip Step 4 if combined file exists
-  force_recombine:            false   # Force re-combining all labeled datasets
+  skip_video_processing:      false
+  skip_pose_extraction:       false
+  skip_pose_clustering:       true
+  skip_annotation_processing: false
+  force_recombine:            false
 
 # -----------------------------------------------------------------------------
-# Video processing (Step 1 — src/video_processing/processing.py)
+# Video Processing (Step 1)
 # -----------------------------------------------------------------------------
 video_processing:
-  raw_video_filename: "camera_a.mkv"  # Expected filename inside each project folder
+  raw_video_filename: "camera_a.mkv"
   fps:                15
   step_size:          1
-  nb_objects:         "2"
+  nb_objects:         2
   yolo_model:         "yolo11m.pt"
   model_size:         "small"
-  object_class:       "0"
+  object_class:       0
   device:             "cuda"
 
 # -----------------------------------------------------------------------------
-# Pose extraction (Step 2 — src/pose/extractor.py)
+# Pose Extraction (Step 2)
 # -----------------------------------------------------------------------------
 pose_extraction:
-  directory:    "PosesDir"             # Subfolder inside each project dir with .tar.gz files
-  abs_base:     0                      # Starting index offset for JSON renaming
+  directory:    "PosesDir"
+  abs_base:     0
   fps:          15
-  id_to_label:                         # Maps tar filename prefix -> person label
+  id_to_label:
     "1": "Therapist1"
     "2": "Patient1"
 
-
 # -----------------------------------------------------------------------------
-# Annotation alignment (Step 4 — src/annotations/generator.py)
-# -----------------------------------------------------------------------------
-annotation_alignment:
-  # Subfolder inside each raw project dir that contains processed_data.csv
-  features_subdir:    "PosesDir"
-  # Column to drop after alignment (utility columns not needed for training)
-  columns_to_drop:    ["time_min:s.ms"]
-  # Person label inferred from annotation label prefix
-  # "C*" -> Child, "T*" -> Therapist
-  label_prefix_map:
-    "C": "Child"
-    "T": "Therapist"
-
-# -----------------------------------------------------------------------------
-# Pose clustering (optional Step 3 — src/pose/clustering.py)
-# Set flags.skip_pose_clustering: true to bypass this step entirely.
+# Pose Clustering (Step 3, optional)
 # -----------------------------------------------------------------------------
 pose_clustering:
-  # Movement detection
-  movement_threshold:   10       # px/frame — above this = "moving"
-  # Proximity zones (pixels)
+  movement_threshold:   10
   proximity_close:      200
   proximity_medium:     400
-  # Approach-response window
-  response_window:      5        # seconds to check for child response after therapist approach
-  # Data preprocessing
+  response_window:      5
   confidence_threshold: 0.5
   smooth_window:        11
   smooth_poly:          3
-  # Clustering k search range [start, stop] (exclusive stop, step 1)
   k_range:              [2, 8]
-  # Session phase detection
-  phase_window:         30       # seconds per window
+  phase_window:         30
   n_phases:             4
-  # Person labels (must match person_label values in processed_data.csv)
   therapist_label:      "Therapist"
   child_label:          "Child"
 
 # -----------------------------------------------------------------------------
-# Project trim times
-# Format per project: [start_sec, end_sec, fps]
-# Use null for end_sec to trim to the end of the video.
+# Annotation Alignment (Step 4)
 # -----------------------------------------------------------------------------
-trim_times:
-  "11-1-2024_#9_INDIVIDUAL_[18]":   [165,  1930, 15]
-  "23-5-2024_#20_INDIVIDUAL_[14]":  [500,  2595, 15]
-  "14-3-2024_#15_INDIVIDUAL_[18]":  [165,  1860, 15]
-  "11-1-2024_#7_INDIVIDUAL_[14]":   [170,  2160, 15]
-  "10-1-2024_#6_INDIVIDUAL_[15]":   [210,  2940, 15]
-  "15-5-2024_#20_INDIVIDUAL_[15]":  [0,    null,  15]
+annotation_alignment:
+  features_subdir:    "PosesDir"
+  columns_to_drop:    ["time_min:s.ms"]
+  label_prefix_map:
+    "C": "Child"
+    "T": "Therapist"
+  auto_trim_buffer:   5      # seconds before/after first/last annotation
 
+# -----------------------------------------------------------------------------
+# Project Trim Times (Optional)
+# -----------------------------------------------------------------------------
+trim_times: {}           # leave empty, auto-computed if not provided
 default_trim: [0, null, 15]
 
 # -----------------------------------------------------------------------------
-# Label map
-# Numeric model output -> human-readable annotation code
+# Label Map
 # -----------------------------------------------------------------------------
 label_map:
   0:  "C"
@@ -121,12 +103,27 @@ label_map:
   9:  "TST"
 
 # -----------------------------------------------------------------------------
-# Model
+# Model Configuration
 # -----------------------------------------------------------------------------
 model:
-  file:          "model_xgboost.joblib"
-  features_file: "feature_names.json"
+  file:          "models/model_xgboost.joblib"
+  features_file: "models/feature_names.json"
   fps:           15
+
+# -----------------------------------------------------------------------------
+# Model Training (Step 5)
+# -----------------------------------------------------------------------------
+model_training:
+  min_samples_per_class: 30
+  test_size:             0.2
+  n_iter_search:         50
+  non_posture_classes:   ["vocalizations", "unlabeled"]
+
+# -----------------------------------------------------------------------------
+# Prediction (Step 6)
+# -----------------------------------------------------------------------------
+predict:
+  data_path: null   # single-project path or null for batch mode
 
 # -----------------------------------------------------------------------------
 # Plotting
@@ -136,29 +133,3 @@ plotting:
   figsize_per_project: [18, 10]
   figsize_global:      [24, 12]
   colormap:            "viridis"
-
-# -----------------------------------------------------------------------------
-# Model training (Step 5 — src/models/train.py)
-# Training is skipped automatically if model.file already exists.
-# Delete the .joblib file (or change model.file path) to retrain.
-# -----------------------------------------------------------------------------
-model_training:
-  min_samples_per_class: 30       # Classes below this count are excluded
-  test_size:             0.2      # Fraction of data held out for evaluation
-  n_iter_search:         50       # RandomizedSearchCV iterations for XGBoost
-  # Classes to exclude from training (non-posture signals)
-  non_posture_classes:   ["vocalizations", "unlabeled"]
-  # Uncomment to override DEFAULT_LABEL_TO_CLASS from train.py:
-  # label_to_class:
-  #   "CCR": "coordination"
-  #   "CHO": "coordination"
-  #   ...
-
-# -----------------------------------------------------------------------------
-# Prediction (Step 6 — src/models/predict.py)
-# Run predict.py standalone for inference on new projects.
-# -----------------------------------------------------------------------------
-predict:
-  # Set data_path for single-project prediction; leave null for batch mode
-  data_path: null
-  # e.g. data_path: "/home/liubov/Bureau/new/14-3-2024_#15_INDIVIDUAL_[18]/PosesDir/processed_data.csv"
