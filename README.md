@@ -16,6 +16,7 @@ This project implements a **modular, config‑driven pipeline** for video proces
 > The pipeline is **fully config‑driven** and supports automatic trim computation from annotation timestamps.
 
 Video Annotation System Pipeline  
+```
 ┌────────────────────────────┐  
 │       Raw Video Files      │  
 │     + Annotations (.txt)   │  
@@ -70,7 +71,7 @@ Video Annotation System Pipeline
 │ - Output predictions.csv   │  
 │ - Optional reports & plots │  
 └────────────────────────────┘  
-
+```
 
 ---
 
