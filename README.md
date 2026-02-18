@@ -85,7 +85,7 @@ video_annotation_system/
 │   ├── pose/
 │   ├── annotations/
 │   ├── models/
-│   └── utils/
+│   └── pipeline/
 │
 ├── configs/
 │   └── config.yaml              # Global configuration
@@ -104,6 +104,7 @@ video_annotation_system/
 │
 ├── models/                      # Trained model artifacts
 ├── outputs/                     # Plots, reports, predictions
+├── requirements.txt
 └── README.md
 ```
 

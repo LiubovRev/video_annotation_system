@@ -1,1 +1,0 @@
-"""MediaPipe pose estimation module."""

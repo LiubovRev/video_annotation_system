@@ -1,1 +1,0 @@
-"""OpenFace face analysis module."""

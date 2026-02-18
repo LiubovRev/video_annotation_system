@@ -1,9 +1,0 @@
-.idea
-
-build
-dist
-generated
-public
-
-*.pyc
-*.egg-info

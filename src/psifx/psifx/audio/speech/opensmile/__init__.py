@@ -1,1 +1,0 @@
-"""openSMILE speech processing module."""
