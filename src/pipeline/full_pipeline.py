@@ -10,16 +10,15 @@ Pipeline stages (per project):
   Step 2 — Pose extraction
   Step 3 — Pose clustering  [optional]
   Step 4 — Annotation alignment
-
-Followed by (across all projects):
-  Step 5 — Model training     [skipped if model exists]
+  Step 5 — Model training
 
 Configuration is loaded from config.yaml at the project root.
 """
+
 import os
 import sys
-import yaml
 from pathlib import Path
+import yaml
 import pandas as pd
 import numpy as np
 import matplotlib as mpl
@@ -27,38 +26,58 @@ mpl.use("Agg")
 import matplotlib.pyplot as plt
 
 # -------------------------
-# Paths and imports
+# Project root and imports
 # -------------------------
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
+PROJECT_ROOT = Path(__file__).parent.parent  # src/
+sys.path.insert(0, str(PROJECT_ROOT))
 
-from video_processing.processing import run_video_processing
-from pose.extractor import run_pose_extraction
-from pose.clustering import run_pose_clustering
-from annotations.generator import run_annotation_alignment
-from models.train import train_model
+# Import pipeline components
+try:
+    from video_processing.processing import run_video_processing
+    from pose.extractor import run_pose_extraction
+    from pose.clustering import run_pose_clustering
+    from annotations.generator import run_annotation_alignment
+    from models.train import train_model
+    from models.predict import predict_annotations, run_batch_predictions
+except ModuleNotFoundError as e:
+    raise ModuleNotFoundError(
+        f"Failed to import modules: {e}. "
+        "Check that PYTHONPATH includes the project root and all src submodules exist."
+    )
 
 # -------------------------
 # Load configuration
 # -------------------------
-CONFIG_FILE = PROJECT_ROOT / "config.yaml"
+# -------------------------
+# Load configuration (fixed paths)
+# -------------------------
+CONFIG_FILE = PROJECT_ROOT.parent / "src" / "config" / "config.yaml"  # project root/config/
 if not CONFIG_FILE.exists():
     raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
 
 with open(CONFIG_FILE, "r") as f:
     cfg = yaml.safe_load(f)
 
-raw_root       = Path(os.getenv("RAW_VIDEO_ROOT", cfg["directories"]["raw_video_root"]))
-processed_root = Path(cfg["directories"]["processed_data_dir"])
-output_base    = Path(cfg["directories"]["output_dir"])
+# Correct raw_root to point relative to project root
+directories_cfg = cfg.get("directories", {})
+PROJECT_ROOT_PARENT = PROJECT_ROOT.parent  # video_annotation_system/
+raw_root       = PROJECT_ROOT_PARENT / (directories_cfg.get("raw_video_root") or "data/raw")
+base_data      = PROJECT_ROOT_PARENT / (directories_cfg.get("base_data_dir") or "data/base")
+output_base    = PROJECT_ROOT_PARENT / (directories_cfg.get("output_base_dir") or "outputs")
 output_base.mkdir(parents=True, exist_ok=True)
 
+print(f"✅ Loaded config from {CONFIG_FILE}")
+print(f"Raw videos: {raw_root}")
+print(f"Output base: {output_base}")
+
 # Pipeline flags
-skip_video_processing      = cfg["flags"].get("skip_video_processing", False)
-skip_pose_extraction       = cfg["flags"].get("skip_pose_extraction", False)
-skip_pose_clustering       = cfg["flags"].get("skip_pose_clustering", True)
-skip_annotation_processing = cfg["flags"].get("skip_annotation_processing", False)
-force_recombine            = cfg["flags"].get("force_recombine", False)
+flags_cfg = cfg.get("flags", {})
+skip_video_processing      = flags_cfg.get("skip_video_processing", False)
+skip_pose_extraction       = flags_cfg.get("skip_pose_extraction", False)
+skip_pose_clustering       = flags_cfg.get("skip_pose_clustering", True)
+skip_annotation_processing = flags_cfg.get("skip_annotation_processing", False)
+force_recombine            = flags_cfg.get("force_recombine", False)
+
 
 # -------------------------
 # Discover projects
@@ -131,6 +150,22 @@ for project_dir in project_dirs:
         print(f"  ✗ Annotation alignment failed, skipping project.")
         continue
 
+    # -------------------------
+    # Step 5: Prediction (NEW)
+    # -------------------------
+    if skip_prediction:
+        print("  → Skipping prediction step (flag set).")
+    else:
+        try:
+            pred_file = output_dir / "predictions_processed_data.csv"
+            if pred_file.exists() and not force_recombine:
+                print(f"  ✓ Predictions already exist: {pred_file.name}")
+            else:
+                print("  → Running prediction...")
+                predict_annotations(combined_csv, output_dir, cfg)
+        except Exception as e:
+            print(f"  ✗ Prediction failed for {project_name}: {e}")
+
 # -------------------------
 # Combine labeled features across projects
 # -------------------------
@@ -141,11 +176,7 @@ print("="*70)
 combined_path = output_base / "combined_labeled_features.csv"
 if combined_path.exists() and not force_recombine:
     print(f"✓ Found existing combined dataset: {combined_path.name}")
-    if not skip_annotation_processing:
-        print("  → Updating combined dataset with new labeled features...")
-        force_recombine = True
-
-if not combined_path.exists() or force_recombine:
+else:
     labeled_files = list(output_base.glob("*/labeled_features.csv"))
     if not labeled_files:
         print("⚠ No labeled feature files found — cannot combine.")
@@ -171,52 +202,8 @@ if not combined_path.exists() or force_recombine:
     combined_df.to_csv(combined_path, index=False)
     print(f"✓ Saved: {combined_path.name}")
 
-    # Plot global annotation distribution
-    if "annotation_label" in combined_df.columns:
-        label_counts = combined_df["annotation_label"].value_counts().sort_values(ascending=False)
-        n_bars  = len(label_counts)
-        colors  = plt.cm.viridis(np.linspace(0.2, 0.9, n_bars))
-        fig, ax = plt.subplots(figsize=(24, 12))
-        bars = ax.bar(range(n_bars), label_counts.values,
-                      color=colors, edgecolor="black", linewidth=2.5, alpha=0.85, width=0.7)
-        ax.set_title("Global Annotation Distribution (All Projects)", fontsize=40, weight="bold", pad=25)
-        ax.set_xlabel("Annotation Label", fontsize=36, weight="bold")
-        ax.set_ylabel("Total Count", fontsize=36, weight="bold")
-        ax.set_xticks(range(n_bars))
-        ax.set_xticklabels(label_counts.index, fontsize=30, rotation=0)
-        ax.tick_params(axis="y", labelsize=30)
-        for bar, count in zip(bars, label_counts.values):
-            ax.text(bar.get_x() + bar.get_width()/2., bar.get_height(),
-                    f"{count:,}", ha="center", va="bottom", fontsize=26, weight="bold")
-        ax.grid(True, alpha=0.3, axis="y", linewidth=1.5)
-        plt.tight_layout()
-        global_plot_path = output_base / "global_annotation_distribution.png"
-        plt.savefig(global_plot_path, dpi=cfg["plotting"]["dpi"], bbox_inches="tight", facecolor="white")
-        plt.close()
-        print(f"✓ Saved: {global_plot_path.name}")
-
 # -------------------------
-# Data sanitization
-# -------------------------
-print("\n--- Data Sanitization ---")
-combined_df = pd.read_csv(combined_path)
-combined_df.replace([np.inf, -np.inf], np.nan, inplace=True)
-before_drop = len(combined_df)
-combined_df.dropna(inplace=True)
-dropped = before_drop - len(combined_df)
-print(f"✓ {'Dropped ' + str(dropped) + ' rows with NaN/infinite values.' if dropped else 'No rows with NaN/infinite values found.'}")
-
-numeric_cols = combined_df.select_dtypes(include=[np.number]).columns
-if len(numeric_cols) > 0:
-    max_val = combined_df[numeric_cols].abs().max().max()
-    print(f"✓ Feature values within reasonable range (max={max_val:.2e}).")
-
-sanitized_path = output_base / "combined_labeled_features_sanitized.csv"
-combined_df.to_csv(sanitized_path, index=False)
-print(f"✓ Saved sanitized data: {sanitized_path.name}")
-
-# -------------------------
-# Step 5: Model Training
+# Step 6: Model Training
 # -------------------------
 print("\n" + "="*70)
 print("MODEL TRAINING")
