@@ -1,9 +1,6 @@
 # Video Annotation System
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Build](https://github.com/LiubovRev/video_annotation_system/actions/workflows/main.yml/badge.svg)](https://github.com/LiubovRev/video_annotation_system/actions)
-[![Stars](https://img.shields.io/github/stars/LiubovRev/video_annotation_system)](https://github.com/LiubovRev/video_annotation_system/stargazers)
 
 **A modular, config-driven pipeline for video preprocessing, pose extraction, annotation alignment, clustering, and ML-based behavior prediction.**
 
