@@ -439,23 +439,3 @@ Key dependencies (see `requirements.txt` for full list):
 **Problem:** Pipeline hangs during video processing  
 **Solution:** Check `video_processing.device` in config — set to `"cpu"` if CUDA is not available
 
----
-
-## Citation
-
-If you use this pipeline in your research, please cite:
-
-```bibtex
-@software{video_annotation_system,
-  title = {Video Annotation System},
-  author = LiubovRev,
-  year = {2026},
-  url = {https://github.com/yourusername/video-annotation-system}
-}
-```
-
----
-
-## License
-
-MIT License — see `LICENSE` file for details.
