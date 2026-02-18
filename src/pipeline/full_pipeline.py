@@ -17,136 +17,123 @@ Followed by (across all projects):
 
 Configuration is loaded from config.yaml at the project root.
 """
-
-
-
 import os
 import sys
 import yaml
+from pathlib import Path
 import pandas as pd
 import numpy as np
-from pathlib import Path
-import matplotlib.pyplot as plt
 import matplotlib as mpl
-import seaborn as sns
+mpl.use("Agg")
+import matplotlib.pyplot as plt
 
-# Add src root to path so submodules can be imported
-sys.path.insert(0, str(Path(__file__).parent.parent))
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
 from video_processing.processing import run_video_processing
 from pose.extractor import run_pose_extraction
 from pose.clustering import run_pose_clustering
 from annotations.generator import run_annotation_alignment
 from models.train import train_model
-from models.predict import predict_annotations
-
-
 
 # =========================
 # Load configuration
 # =========================
-CONFIG_FILE = Path(__file__).parent.parent.parent / "config.yaml"
+CONFIG_FILE = PROJECT_ROOT / "config.yaml"
 if not CONFIG_FILE.exists():
     raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
 
 with open(CONFIG_FILE, "r") as f:
     cfg = yaml.safe_load(f)
-    raw_root = os.getenv("RAW_VIDEO_ROOT", cfg['directories']['raw_video_root'])
 
-
-# Directories
-BASE_DATA_DIR   = Path(cfg["directories"]["processed_data_dir"])
-OUTPUT_BASE_DIR = Path(cfg["directories"]["output_dir"])
-ANNOTATIONS_DIR = Path(cfg["directories"]["annotations_dir"])
-OUTPUT_BASE_DIR.mkdir(exist_ok=True, parents=True)
+RAW_ROOT = Path(os.getenv("RAW_VIDEO_ROOT", cfg["directories"]["raw_video_root"]))
+PROCESSED_ROOT = Path(cfg["directories"]["processed_data_dir"])
+OUTPUT_ROOT = Path(cfg["directories"]["output_dir"])
+OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
 # Pipeline flags
-SKIP_POSE_CLUSTERING       = cfg["flags"]["skip_pose_clustering"]
-SKIP_ANNOTATION_PROCESSING = cfg["flags"]["skip_annotation_processing"]
-FORCE_RECOMBINE            = cfg["flags"]["force_recombine"]
-
-# Trimming parameters
-TRIM_TIMES   = {k: tuple(v) for k, v in cfg["trim_times"].items()}
-DEFAULT_TRIM = tuple(cfg["default_trim"])
+SKIP_VIDEO_PROCESSING      = cfg["flags"].get("skip_video_processing", False)
+SKIP_POSE_EXTRACTION       = cfg["flags"].get("skip_pose_extraction", False)
+SKIP_POSE_CLUSTERING       = cfg["flags"].get("skip_pose_clustering", True)
+SKIP_ANNOTATION_PROCESSING = cfg["flags"].get("skip_annotation_processing", False)
+FORCE_RECOMBINE            = cfg["flags"].get("force_recombine", False)
 
 # =========================
-# Project directories
+# Discover projects
 # =========================
-project_dirs = [d for d in BASE_DATA_DIR.iterdir() if d.is_dir()]
-print(f"\nFound {len(project_dirs)} project directories.\n{'='*70}")
+project_dirs = [d for d in RAW_ROOT.iterdir() if d.is_dir()]
+print(f"\nFound {len(project_dirs)} project directories.\n{'=' * 70}")
 
 # =========================
-# MAIN LOOP: Per-project processing
+# Per-project processing
 # =========================
 for project_dir in project_dirs:
     project_name = project_dir.name
-    OUTPUT_DIR = OUTPUT_BASE_DIR / project_name
-    OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+    output_dir = OUTPUT_ROOT / project_name
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n▶ Processing project: {project_name}")
 
     # -------------------------------
     # Step 1: Video processing
     # -------------------------------
-    raw_video_root = Path(cfg["directories"]["raw_video_root"])
-    raw_project_path = raw_video_root / project_name
-    if raw_project_path.exists():
-        success = run_video_processing(raw_project_path, cfg)
-        if not success:
-            print(f"  ✗ Video processing failed for {project_name}, skipping project.")
+    if not SKIP_VIDEO_PROCESSING:
+        if not run_video_processing(project_dir, cfg):
+            print("  ✗ Video processing failed, skipping project.")
             continue
     else:
-        print(f"  ⚠ Raw project folder not found at {raw_project_path} — skipping video processing step.")
+        print("  → Skipping video processing step.")
 
     # -------------------------------
     # Step 2: Pose extraction
     # -------------------------------
-    if raw_project_path.exists():
-        success = run_pose_extraction(raw_project_path, cfg)
-        if not success:
-            print(f"  ✗ Pose extraction failed for {project_name}, skipping project.")
+    if not SKIP_POSE_EXTRACTION:
+        if not run_pose_extraction(project_dir, cfg):
+            print("  ✗ Pose extraction failed, skipping project.")
             continue
     else:
-        print(f"  ⚠ Raw project folder not found — skipping pose extraction step.")
+        print("  → Skipping pose extraction step.")
 
     # -------------------------------
-    # Load pose data
+    # Merge processed parquet files
     # -------------------------------
-    parquet_files = list(project_dir.glob("processed_data__*.parquet"))
-    if not parquet_files:
-        print(f"  ⚠ No parquet files found, skipping...")
+    processed_files = list(project_dir.glob("processed_data__*.parquet"))
+    if not processed_files:
+        print("  ⚠ No processed parquet files found — skipping project.")
         continue
 
-    csv_path = project_dir / "processed_data.csv"
-    if not csv_path.exists():
-        df = pd.concat([pd.read_parquet(pf) for pf in parquet_files], ignore_index=True)
-        df['person_label'] = df['person_label'].replace('Patient1', 'Child')
-        df.to_csv(csv_path, index=False)
-        print(f"  ✓ Merged and saved {len(df)} rows from {len(parquet_files)} files.")
+    combined_csv = project_dir / "processed_data.csv"
+
+    if not combined_csv.exists() or FORCE_RECOMBINE:
+        df = pd.concat([pd.read_parquet(pf) for pf in processed_files], ignore_index=True)
+
+        # Neutral identity mapping
+        id_map = cfg["pose_extraction"].get("id_to_label", {})
+        df["person_label"] = df["person_label"].replace(id_map)
+
+        df.to_csv(combined_csv, index=False)
+        print(f"  ✓ Merged {len(processed_files)} parquet files into {combined_csv.name}")
     else:
-        df = pd.read_csv(csv_path)
-        print(f"  ✓ Loaded existing CSV: {csv_path.name} ({len(df)} rows)")
+        df = pd.read_csv(combined_csv)
+        print(f"  ✓ Loaded existing CSV: {combined_csv.name} ({len(df)} rows)")
 
     # -------------------------------
-    # Step 3: Pose clustering (optional)
+    # Step 3: Pose clustering
     # -------------------------------
-    pose_output_path = OUTPUT_DIR / f"pose_clusters_{project_name}.parquet"
     if SKIP_POSE_CLUSTERING:
-        print("  → Skipping pose clustering (flags.skip_pose_clustering: true).")
-    elif pose_output_path.exists():
-        print(f"  ✓ Using cached pose clustering: {pose_output_path.name}")
+        print("  → Skipping pose clustering step.")
     else:
-        print("  Running pose clustering...")
-        try:
-            pose_results = run_pose_clustering(
-                project_dir=project_dir,
-                output_dir=OUTPUT_DIR,
-                cfg=cfg,
+        cluster_path = output_dir / f"pose_clusters_{project_name}.parquet"
+
+        if cluster_path.exists() and not FORCE_RECOMBINE:
+            print(f"  ✓ Existing cluster file found: {cluster_path.name}")
+        else:
+            print("  → Running pose clustering...")
+            run_pose_clustering(
+                df=df,
+                output_path=cluster_path,
+                cfg=cfg
             )
-            pose_results["data"].to_parquet(pose_output_path)
-            print(f"  ✓ Pose clustering completed and cached.")
-        except Exception as e:
-            print(f"  ✗ Pose clustering failed: {e}")
-            # Non-fatal — continue to annotation alignment
 
     # -------------------------------
     # Step 4: Annotation alignment
