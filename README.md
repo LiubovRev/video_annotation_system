@@ -1,7 +1,3 @@
-Here you go — your entire document rewritten cleanly in **GitHub‑flavored Markdown**, fully structured and consistent.
-
----
-
 # Video Annotation System
 
 ## Overview
@@ -19,61 +15,61 @@ This project implements a **modular, config‑driven pipeline** for video proces
 
 > The pipeline is **fully config‑driven** and supports automatic trim computation from annotation timestamps.
 
-Video Annotation System Pipeline
-┌───────────────────────────┐
-│       Raw Video Files      │
-│     + Annotations (.txt)   │
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│     Step 1: Video Processing │
-│ - Trim videos (optional)     │
-│ - Object tracking (SAMURAI) │
-│ - Pose overlay (MediaPipe)   │
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│     Step 2: Pose Extraction │
-│ - Extract JSON keypoints    │
-│ - Normalize & compute features │
-│ - Save processed_data.csv   │
-└─────────────┬─────────────┘
-              │
-        ┌─────┴─────┐
-        │ Optional  │
-        ▼           ▼
-┌───────────────────────────┐
-│ Step 3: Pose Clustering   │
-│ - Movement & proximity    │
-│ - Interaction analysis    │
-│ - Cluster assignments     │
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│ Step 4: Annotation Alignment │
-│ - Map annotations to pose    │
-│ - Filter, trim & label frames│
-│ - Save labeled_features.csv  │
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│ Step 5: Model Training     │
-│ - Combine datasets          │
-│ - Train XGBoost/LightGBM   │
-│ - Save model & feature list │
-└─────────────┬─────────────┘
-              │
-              ▼
-┌───────────────────────────┐
-│ Step 6: Prediction         │
-│ - Single-project or batch  │
-│ - Output predictions.csv   │
-│ - Optional reports & plots │
-└───────────────────────────┘
+Video Annotation System Pipeline  
+┌────────────────────────────┐  
+│       Raw Video Files      │  
+│     + Annotations (.txt)   │  
+└─────────────┬──────────────┘  
+              │  
+              ▼  
+┌──────────────────────────────┐  
+│     Step 1: Video Processing │  
+│ - Trim videos (optional)     │  
+│ - Object tracking (SAMURAI)  │  
+│ - Pose overlay (MediaPipe)   │  
+└─────────────┬────────────────┘  
+              │  
+              ▼  
+┌────────────────────────────────┐  
+│     Step 2: Pose Extraction    │  
+│ - Extract JSON keypoints       │  
+│ - Normalize & compute features │  
+│ - Save processed_data.csv      │  
+└─────────────┬──────────────────┘  
+              │  
+        ┌─────┴─────┐  
+        │ Optional  │  
+        ▼           ▼  
+┌───────────────────────────┐  
+│ Step 3: Pose Clustering   │  
+│ - Movement & proximity    │  
+│ - Interaction analysis    │  
+│ - Cluster assignments     │  
+└─────────────┬─────────────┘  
+              │  
+              ▼  
+┌──────────────────────────────┐  
+│ Step 4: Annotation Alignment │  
+│ - Map annotations to pose    │  
+│ - Filter, trim & label frames│  
+│ - Save labeled_features.csv  │  
+└─────────────┬────────────────┘  
+              │  
+              ▼  
+┌─────────────────────────────┐  
+│ Step 5: Model Training      │  
+│ - Combine datasets          │  
+│ - Train XGBoost/LightGBM    │  
+│ - Save model & feature list │  
+└─────────────┬───────────────┘  
+              │  
+              ▼  
+┌────────────────────────────┐  
+│ Step 6: Prediction         │  
+│ - Single-project or batch  │  
+│ - Output predictions.csv   │  
+│ - Optional reports & plots │  
+└────────────────────────────┘  
 
 
 ---
