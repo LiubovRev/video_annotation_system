@@ -1,29 +1,62 @@
-# virtual environments
+# -------------------------
+# Virtual environments
+# -------------------------
 .venv/
 venv/
 
-# python
+# -------------------------
+# Python cache & compiled files
+# -------------------------
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# data & outputs
+# -------------------------
+# Data & raw videos
+# -------------------------
+data/raw/             # ignore all raw video files
 *.mp4
 *.avi
 *.mov
-*.jpg
-*.jpeg
-*.png
 
+# Ignore intermediate frames, masks, faces, visualizations
 Frames/
 MaskDir/
 FacesDir/
 Visualizations/
 
-# logs
+# -------------------------
+# Logs
+# -------------------------
 *.log
-*.mp4
-*.avi
-*.mov
-*.mkv
 *.bin
 *.dat
+*.mkv
+
+# -------------------------
+# Image files (temporary/intermediate only)
+# -------------------------
+# ignore images in temporary directories
+Frames/*.jpg
+Frames/*.jpeg
+Frames/*.png
+MaskDir/*.jpg
+MaskDir/*.jpeg
+MaskDir/*.png
+Visualizations/*.jpg
+Visualizations/*.jpeg
+Visualizations/*.png
+
+# -------------------------
+# Exceptions / keep plots you want to commit
+# -------------------------
+# Keep final plots in outputs/plots/
+!outputs/plots/
+!outputs/plots/**
+
+# -------------------------
+# Optional: OS & editor files
+# -------------------------
+.DS_Store
+*.swp

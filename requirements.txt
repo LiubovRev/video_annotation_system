@@ -85,6 +85,7 @@ langchain-openai==0.3.35
 langchain-text-splitters==0.3.11
 langsmith==0.4.34
 lazy_loader==0.4
+lightgbm==4.6.0
 lightning==2.5.5
 lightning-utilities==0.15.2
 loguru==0.7.3
@@ -181,6 +182,7 @@ sam2==1.1.0
 scikit-image==0.25.2
 scikit-learn==1.7.2
 scipy==1.15.3
+seaborn==0.13.2
 semver==3.0.4
 sentencepiece==0.2.1
 shellingham==1.5.4
@@ -219,6 +221,7 @@ ultralytics==8.3.212
 ultralytics-thop==2.0.17
 urllib3==2.5.0
 whisperx==3.7.4
+xgboost==3.2.0
 yarl==1.22.0
 zipp==3.23.0
 zstandard==0.25.0

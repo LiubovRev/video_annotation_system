@@ -90,10 +90,9 @@ video_annotation_system/
 │   ├── pose/
 │   ├── annotations/
 │   ├── models/
+│   ├── configs/
+│   	└── config.yaml              # Global configuration
 │   └── pipeline/
-│
-├── configs/
-│   └── config.yaml              # Global configuration
 │
 ├── data/
 │   ├── raw/                     # Raw video projects
