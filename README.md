@@ -11,7 +11,7 @@ This project implements a **modular, config‑driven pipeline** for video proces
 
 ### Key Features
 
-- **Video preprocessing** — trimming, object tracking (SAMURAI), pose estimation (MediaPipe)  
+- **Video preprocessing** — trimming, object tracking (SAM3), pose estimation (MediaPipe)  
 - **Pose extraction** — JSON parsing, feature engineering, temporal features  
 - **Pose clustering (optional)** — therapist–child interaction analysis  
 - **Annotation alignment** — time‑based mapping of annotations to pose data  
@@ -31,7 +31,7 @@ Video Annotation System Pipeline
 ┌──────────────────────────────┐  
 │     Step 1: Video Processing │  
 │ - Trim videos (optional)     │  
-│ - Object tracking (SAMURAI)  │  
+│ - Object tracking (SAM3)  │  
 │ - Pose overlay (MediaPipe)   │  
 └─────────────┬────────────────┘  
               │  
