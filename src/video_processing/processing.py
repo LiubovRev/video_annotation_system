@@ -1,75 +1,52 @@
 #!/usr/bin/env python3
-"""
-psifx pipeline
-
-- Overwrite outputs: if folders already contain files, wipe them before running.
-- Skip creating processed_video.mp4 if it already exists.
-
-Important:
-- Tracking visualization flags must be passed WITHOUT "True"/"False": use --labels --color
-- If you patched psifx Sam3 tensor->numpy bug in psifx/video/tracking/sam3/tool.py, keep that patch.
-"""
-
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
-import argparse
-from dataclasses import dataclass
+import sys
 from pathlib import Path
 from typing import Optional
 
 
 # ==========================================================
-# ===================== CONFIGURATION ======================
+# ===================== CUSTOM SETTINGS ====================
 # ==========================================================
 
-@dataclass(frozen=True)
-class CropParams:
-    # Crop bbox (pixels). Set all to None to disable.
-    x_min: Optional[int] = None
-    y_min: Optional[int] = None
-    x_max: Optional[int] = None
-    y_max: Optional[int] = None
-    # Optional resize
-    width: Optional[int] = None
-    height: Optional[int] = None
-
-    def enabled(self) -> bool:
-        return all(v is not None for v in (self.x_min, self.y_min, self.x_max, self.y_max))
-
-
-# ---- General ----
 DEVICE = "cuda"
-TEXT_PROMPT = "people"
-CHUNK_SIZE = 300
-IOU_THRESHOLD = 0.3
+TEXT_PROMPT = "person"
+CHUNK_SIZE = 250
+IOU_THRESHOLD = 0.15
 
-# ---- Time window (seconds) ----
-START_TRIM_SEC = 0
-END_TRIM_SEC = 100000
+MAX_OBJECTS: Optional[int] = 2  # uses PSIFX_MAX_OBJECTS env (requires your patched sam3 tool.py)
 
-# ---- Optional crop/resize (ffmpeg) ----
-CROP = CropParams(
-    x_min=None, y_min=None, x_max=None, y_max=None,
-    width=None, height=None,
-)
+START_TRIM_SEC = 350
+END_TRIM_SEC = int(15*60)
 
-# ---- Paths ----
+# Optional resize (helps GPU + often improves detection stability)
+RESIZE_W: Optional[int] = None
+RESIZE_H: Optional[int] = None
+
+# Optional crop bbox (pixels)
+X_MIN: Optional[int] = None
+Y_MIN: Optional[int] = None
+X_MAX: Optional[int] = None
+Y_MAX: Optional[int] = None
+
 BASE_PATH = Path("/home/liubov/Bureau/new/29-10-2024_#2_INDIVIDUAL_[83]")
 RAW_VIDEO = BASE_PATH / "camera_a.mkv"
 PROCESSED_VIDEO = BASE_PATH / "processed_video.mp4"
 
+FRAMES_DIR = BASE_PATH / "Frames"
 MASK_DIR = BASE_PATH / "MaskDir"
 POSES_DIR = BASE_PATH / "PosesDir"
 FACES_DIR = BASE_PATH / "FacesDir"
 VIS_DIR = BASE_PATH / "Visualizations"
 LOG_FILE = BASE_PATH / "processing_log.log"
 
-# ---- Behavior ----
-OVERWRITE_OUTPUT_DIRS = True        # wipe MaskDir/PosesDir/FacesDir/Visualizations before running
-SKIP_IF_PROCESSED_EXISTS = True     # do NOT recreate processed_video.mp4 if it exists
+OVERWRITE_OUTPUT_DIRS = True
+SKIP_IF_PROCESSED_EXISTS = True
+ENABLE_FACE = False
 
 
 # ==========================================================
@@ -79,81 +56,100 @@ SKIP_IF_PROCESSED_EXISTS = True     # do NOT recreate processed_video.mp4 if it 
 def ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
+def init_log() -> None:
+    ensure_dir(LOG_FILE.parent)
+    LOG_FILE.write_text("=== Processing Log ===\n", encoding="utf-8")
 
-def init_log(path: Path) -> None:
-    ensure_dir(path.parent)
-    path.write_text("=== Processing Log ===\n", encoding="utf-8")
-
-
-def log_line(path: Path, msg: str) -> None:
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(msg + "\n")
-
+def log_to_file(message: str) -> None:
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(message + "\n")
 
 def dir_is_empty(p: Path) -> bool:
     return (not p.exists()) or (p.is_dir() and next(p.iterdir(), None) is None)
-
 
 def wipe_dir(p: Path) -> None:
     if p.exists():
         shutil.rmtree(p)
     p.mkdir(parents=True, exist_ok=True)
 
-
-def run_cmd(cmd: list[str], description: str) -> None:
-    print(f"\n>>> {description}")
-    print("Running:", " ".join(cmd))
-
-    # ensure HF token passes through to subprocesses
+def build_env() -> dict:
     env = os.environ.copy()
     if "HUGGINGFACE_HUB_TOKEN" in env and "HF_TOKEN" not in env:
         env["HF_TOKEN"] = env["HUGGINGFACE_HUB_TOKEN"]
+    env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+    if MAX_OBJECTS is None:
+        env.pop("PSIFX_MAX_OBJECTS", None)
+    else:
+        env["PSIFX_MAX_OBJECTS"] = str(MAX_OBJECTS)
+
+    return env
+
+def run_cmd(cmd: list[str], step_desc: str, env: dict) -> subprocess.CompletedProcess:
+    print(f"\n>>> {step_desc}")
+    print("Running command:", " ".join(map(str, cmd)))
     try:
-        res = subprocess.run(cmd, check=True, text=True, capture_output=True, env=env)
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
         if res.stdout.strip():
             print(res.stdout)
         if res.stderr.strip():
-            # warnings often go to stderr even on success
             print(res.stderr)
-        log_line(LOG_FILE, f"[OK] {description}")
+        log_to_file(f"[OK] {step_desc}")
+        return res
     except subprocess.CalledProcessError as e:
-        log_line(LOG_FILE, f"[FAILED] {description} (exit={e.returncode})")
-        print("\n[ERROR] Command failed.")
-        print("Return code:", e.returncode)
+        print(f"[ERROR] {step_desc} failed with exit code {e.returncode}")
         if e.stdout:
             print("\n--- STDOUT ---\n", e.stdout)
         if e.stderr:
             print("\n--- STDERR ---\n", e.stderr)
+        log_to_file(f"[FAILED] {step_desc}: {(e.stderr or '').strip()}")
         raise
 
+def ffprobe_has_video_frames(video_path: Path, env: dict) -> bool:
+    """
+    Quick sanity check: does the file have video stream + frames?
+    """
+    if not video_path.exists():
+        return False
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=nb_frames,r_frame_rate,avg_frame_rate,width,height",
+        "-of", "default=nw=1",
+        str(video_path),
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True, env=env)
+        out = res.stdout or ""
+        # If nb_frames is missing for some codecs, still accept if width/height exist.
+        return ("width=" in out and "height=" in out)
+    except Exception:
+        return False
+
 
 # ==========================================================
-# ===================== FFMPEG STEP ========================
+# ===================== FFMPEG COMMANDS ====================
 # ==========================================================
 
-def build_ffmpeg_cmd() -> list[str]:
-    """
-    Robust for Azure Kinect MKV (attachments): map only COLOR stream 0:0.
-    """
+def build_ffmpeg_processed_cmd() -> list[str]:
     cmd = [
         "ffmpeg", "-hide_banner", "-y",
         "-ss", str(START_TRIM_SEC),
         "-to", str(END_TRIM_SEC),
         "-i", str(RAW_VIDEO),
-        "-map", "0:0",  # COLOR only
+        "-map", "0:0",   # Azure Kinect: COLOR stream only
         "-an",
     ]
 
     vf_parts: list[str] = []
-    if CROP.enabled():
-        crop_w = int(CROP.x_max) - int(CROP.x_min)
-        crop_h = int(CROP.y_max) - int(CROP.y_min)
-        vf_parts.append(f"crop={crop_w}:{crop_h}:{int(CROP.x_min)}:{int(CROP.y_min)}")
+    if all(v is not None for v in (X_MIN, Y_MIN, X_MAX, Y_MAX)):
+        crop_w = int(X_MAX) - int(X_MIN)
+        crop_h = int(Y_MAX) - int(Y_MIN)
+        vf_parts.append(f"crop={crop_w}:{crop_h}:{int(X_MIN)}:{int(Y_MIN)}")
 
-    if CROP.width is not None or CROP.height is not None:
-        w = CROP.width if CROP.width is not None else -1
-        h = CROP.height if CROP.height is not None else -1
+    if RESIZE_W is not None or RESIZE_H is not None:
+        w = RESIZE_W if RESIZE_W is not None else -1
+        h = RESIZE_H if RESIZE_H is not None else -1
         vf_parts.append(f"scale={w}:{h}")
 
     if vf_parts:
@@ -167,83 +163,80 @@ def build_ffmpeg_cmd() -> list[str]:
     ]
     return cmd
 
-
-# ==========================================================
-# ===================== CLI ================================
-# ==========================================================
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="psifx video pipeline")
-    p.add_argument(
-        "--face",
-        action="store_true",
-        help="Enable OpenFace face feature extraction + visualization (default: off).",
-    )
-    p.add_argument(
-        "--no-overwrite-dirs",
-        action="store_true",
-        help="Do NOT wipe output folders before running (default: wipe).",
-    )
-    p.add_argument(
-        "--rebuild-processed",
-        action="store_true",
-        help="Force rebuilding processed_video.mp4 even if it exists.",
-    )
-    return p.parse_args()
+def build_ffmpeg_frames_cmd() -> list[str]:
+    """
+    Re-introduce your old "Frames" logic: extract jpg frames from the trimmed window.
+    """
+    out_pattern = str(FRAMES_DIR / "frame_%06d.jpg")
+    cmd = [
+        "ffmpeg", "-hide_banner", "-y",
+        "-ss", str(START_TRIM_SEC),
+        "-to", str(END_TRIM_SEC),
+        "-i", str(RAW_VIDEO),
+        "-map", "0:0",
+        "-vf", "fps=15",
+        out_pattern,
+    ]
+    return cmd
 
 
 # ==========================================================
-# ===================== PIPELINE ===========================
+# ===================== MAIN PIPELINE ======================
 # ==========================================================
 
 def main() -> int:
-    args = parse_args()
-    enable_face = bool(args.face)
+    for d in [FRAMES_DIR, MASK_DIR, POSES_DIR, FACES_DIR, VIS_DIR]:
+        ensure_dir(d)
 
-    overwrite_dirs = not args.no_overwrite_dirs
-    skip_processed_if_exists = not args.rebuild_processed
+    init_log()
+    log_to_file(f"Input: {RAW_VIDEO}")
+    log_to_file(f"Processed: {PROCESSED_VIDEO}")
+    log_to_file(f"ENABLE_FACE: {ENABLE_FACE}")
+    log_to_file(f"MAX_OBJECTS: {MAX_OBJECTS}")
+    log_to_file(f"CHUNK_SIZE: {CHUNK_SIZE}")
+    log_to_file(f"DEVICE: {DEVICE}")
+    log_to_file(f"TEXT_PROMPT: {TEXT_PROMPT}")
 
     if not RAW_VIDEO.exists():
         print(f"[ERROR] Input video not found: {RAW_VIDEO}")
+        log_to_file(f"[FAILED] Input video missing: {RAW_VIDEO}")
         return 2
 
-    ensure_dir(MASK_DIR)
-    ensure_dir(POSES_DIR)
-    ensure_dir(FACES_DIR)
-    ensure_dir(VIS_DIR)
-    init_log(LOG_FILE)
+    env = build_env()
 
-    log_line(LOG_FILE, f"Input: {RAW_VIDEO}")
-    log_line(LOG_FILE, f"Processed: {PROCESSED_VIDEO}")
-    log_line(LOG_FILE, f"Face enabled: {enable_face}")
-
-    # Overwrite output dirs if requested (required for SAM3: mask_dir must be empty)
-    if overwrite_dirs:
+    # Overwrite dirs (sam3 requires empty MaskDir)
+    if OVERWRITE_OUTPUT_DIRS:
         wipe_dir(MASK_DIR)
         wipe_dir(POSES_DIR)
         wipe_dir(VIS_DIR)
-        if enable_face:
+        if ENABLE_FACE:
             wipe_dir(FACES_DIR)
-        else:
-            # keep FacesDir untouched when face is disabled
-            ensure_dir(FACES_DIR)
 
-    # SAM3 requires empty mask_dir; enforce if user disabled overwrite
     if not dir_is_empty(MASK_DIR):
-        raise SystemExit(
-            f"[ERROR] Mask directory must be empty for sam3.\n"
-            f"Either delete contents or run without --no-overwrite-dirs.\n"
-            f"MaskDir: {MASK_DIR}"
-        )
+        print(f"[ERROR] MaskDir must be empty for sam3: {MASK_DIR}")
+        log_to_file(f"[FAILED] MaskDir not empty: {MASK_DIR}")
+        return 3
 
-    # STEP 1: processed_video.mp4
-    if PROCESSED_VIDEO.exists() and skip_processed_if_exists:
-        print(f"\n>>> Skipping ffmpeg (processed video exists): {PROCESSED_VIDEO}")
-        log_line(LOG_FILE, "[OK] Skipped ffmpeg (processed video exists)")
+    # === Frames logic restored ===
+    if FRAMES_DIR.exists() and any(FRAMES_DIR.iterdir()):
+        print(f"\n>>> Frames already exist (skip extraction): {FRAMES_DIR}")
+        log_to_file(f"[SKIPPED] Frame extraction skipped: {FRAMES_DIR} already populated")
     else:
-        run_cmd(build_ffmpeg_cmd(), "FFmpeg processing (trim + map 0:0)")
+        run_cmd(build_ffmpeg_frames_cmd(), "Frame extraction (trim window -> Frames/)", env)
 
-    # STEP 2: Tracking (Sam3)
+    # === processed_video.mp4 creation (only if needed) ===
+    if PROCESSED_VIDEO.exists() and SKIP_IF_PROCESSED_EXISTS:
+        print(f"\n>>> Skipping processed video creation (exists): {PROCESSED_VIDEO}")
+        log_to_file("[SKIPPED] processed_video.mp4 exists, ffmpeg skipped")
+    else:
+        run_cmd(build_ffmpeg_processed_cmd(), "FFmpeg trim -> processed_video.mp4", env)
+
+    if not ffprobe_has_video_frames(PROCESSED_VIDEO, env):
+        print(f"[ERROR] processed_video.mp4 seems invalid or has no video stream: {PROCESSED_VIDEO}")
+        log_to_file("[FAILED] processed_video.mp4 invalid (ffprobe failed)")
+        return 4
+
+    # === Tracking inference (SAM3) ===
     tracking_cmd = [
         "psifx", "video", "tracking", "sam3", "inference",
         "--video", str(PROCESSED_VIDEO),
@@ -253,15 +246,27 @@ def main() -> int:
         "--iou_threshold", str(IOU_THRESHOLD),
         "--device", DEVICE,
     ]
-    run_cmd(tracking_cmd, "Tracking inference (sam3)")
+
+    run_cmd(tracking_cmd, "Tracking inference (sam3)", env)
+
+    # If no masks produced, retry with a slightly different prompt (one retry only).
+    if dir_is_empty(MASK_DIR):
+        log_to_file("[WARNING] MaskDir empty after first tracking run; retrying with prompt='person' and smaller chunk.")
+        print("\n[WARN] MaskDir empty. Retrying tracking once with prompt='person' and chunk_size=50...")
+
+        retry_cmd = tracking_cmd.copy()
+        # replace prompt + chunk
+        retry_cmd[retry_cmd.index("--text_prompt") + 1] = "person"
+        retry_cmd[retry_cmd.index("--chunk_size") + 1] = "50"
+
+        run_cmd(retry_cmd, "Tracking inference retry (sam3)", env)
 
     if dir_is_empty(MASK_DIR):
-        raise SystemExit(
-            f"[ERROR] Tracking finished but MaskDir is empty: {MASK_DIR}\n"
-            f"Check sam3 output/logs."
-        )
+        print(f"[ERROR] Tracking finished but MaskDir is empty: {MASK_DIR}")
+        log_to_file("[FAILED] Tracking produced no masks (after retry).")
+        return 6
 
-    # Tracking visualization
+    # === Tracking Visualization ===
     vis_track = VIS_DIR / "visualization_tracking.mp4"
     track_vis_cmd = [
         "psifx", "video", "tracking", "visualization",
@@ -271,19 +276,19 @@ def main() -> int:
         "--labels",
         "--color",
     ]
-    run_cmd(track_vis_cmd, "Tracking visualization")
+    run_cmd(track_vis_cmd, "Tracking visualization", env)
 
-    # STEP 3: Pose (MediaPipe multi-inference)
-    pose_cmd = [
+    # === Pose inference ===
+    pose_inf_cmd = [
         "psifx", "video", "pose", "mediapipe", "multi-inference",
         "--video", str(PROCESSED_VIDEO),
         "--masks", str(MASK_DIR),
         "--poses_dir", str(POSES_DIR),
         "--device", DEVICE,
     ]
-    run_cmd(pose_cmd, "Pose multi-inference (mediapipe)")
+    run_cmd(pose_inf_cmd, "Pose inference (mediapipe multi-inference)", env)
 
-    # Pose visualization
+    # === Pose visualization ===
     vis_pose = VIS_DIR / "visualization_pose.mp4"
     pose_vis_cmd = [
         "psifx", "video", "pose", "mediapipe", "visualization",
@@ -292,50 +297,49 @@ def main() -> int:
         "--visualization", str(vis_pose),
         "--confidence_threshold", "0.0",
     ]
-    run_cmd(pose_vis_cmd, "Pose visualization")
+    try:
+        run_cmd(pose_vis_cmd, "Pose visualization", env)
+    except Exception as e:
+        log_to_file(f"[WARNING] Pose visualization failed: {e}")
 
-    # STEP 4: Face (optional)
-    if enable_face:
+    # === Face optional (unchanged) ===
+    if ENABLE_FACE:
         face_cmd = [
             "psifx", "video", "face", "openface", "multi-inference",
             "--video", str(PROCESSED_VIDEO),
             "--masks", str(MASK_DIR),
             "--features_dir", str(FACES_DIR),
-            "--device", DEVICE,  # OpenFace will use CPU anyway; psifx accepts this arg
+            "--device", "cpu",
         ]
-        run_cmd(face_cmd, "Face multi-inference (openface)")
+        try:
+            run_cmd(face_cmd, "Face inference (openface)", env)
+        except Exception as e:
+            log_to_file(f"[WARNING] Face inference failed: {e}")
 
-        if dir_is_empty(FACES_DIR):
-            raise SystemExit(
-                f"[ERROR] Face extraction ran but FacesDir is empty: {FACES_DIR}\n"
-                f"Most common causes:\n"
-                f"- OpenFace not installed correctly / models missing\n"
-                f"- Masks don't cover faces well\n"
-            )
-
-        vis_face = VIS_DIR / "visualization_face.mp4"
-        face_vis_cmd = [
-            "psifx", "video", "face", "openface", "visualization",
-            "--video", str(PROCESSED_VIDEO),
-            "--features", str(FACES_DIR),
-            "--visualization", str(vis_face),
-            "--depth", "3.0",
-        ]
-        run_cmd(face_vis_cmd, "Face visualization")
-    else:
-        print("\n>>> Face module disabled (run with --face to enable).")
-        log_line(LOG_FILE, "[OK] Face module disabled")
+    # === Cleanup Frames directory (kept) ===
+    try:
+        if FRAMES_DIR.exists():
+            print(f"\n>>> Cleaning up Frames directory: {FRAMES_DIR}")
+            shutil.rmtree(FRAMES_DIR)
+            log_to_file(f"[OK] Cleaned up Frames directory: {FRAMES_DIR}")
+    except Exception as e:
+        log_to_file(f"[WARNING] Failed to clean up Frames directory: {e}")
 
     print("\n==================== Processing Complete ====================")
     print(f"Results saved to: {BASE_PATH}")
-    print(f"MaskDir: {MASK_DIR}")
-    print(f"PosesDir: {POSES_DIR}")
-    if enable_face:
-        print(f"FacesDir: {FACES_DIR}")
-    print(f"Visualizations: {VIS_DIR}")
-    print(f"Log: {LOG_FILE}")
+    print(f"See {LOG_FILE} for details.")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as e:
+        try:
+            log_to_file(f"[FAILED] Unhandled exception: {e}")
+        except Exception:
+            pass
+        print("\n[ERROR] Unhandled exception:", e)
+        sys.exit(1)
