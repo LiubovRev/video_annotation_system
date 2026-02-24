@@ -40,12 +40,6 @@ When running the pipeline:
 - If not, the system securely prompts you to enter it (input is hidden).
 - The token is automatically injected into the environment variable:
 
-```
-
-HUGGINGFACE_HUB_TOKEN
-
-````
-
 ### Set Token Permanently (Recommended)
 
 ```bash
