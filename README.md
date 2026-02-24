@@ -1,86 +1,141 @@
+```md
 # Video Annotation System
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
 
 **A modular, config-driven pipeline for video preprocessing, pose extraction, annotation alignment, clustering, and ML-based behavior prediction.**
 
+---
 
 ## Overview
 
-This project implements a **modular, config‑driven pipeline** for video processing, pose extraction, optional clustering, annotation alignment, and machine‑learning‑based behavior classification.
+This project implements a **modular, config-driven pipeline** for:
 
-### Key Features
+- Video preprocessing  
+- Object tracking  
+- Pose estimation  
+- Optional clustering  
+- Annotation alignment  
+- Machine learning classification  
+- Prediction on new data  
 
-- **Video preprocessing** — trimming, object tracking (SAM3), pose estimation (MediaPipe)  
-- **Pose extraction** — JSON parsing, feature engineering, temporal features  
-- **Pose clustering (optional)** — therapist–child interaction analysis  
-- **Annotation alignment** — time‑based mapping of annotations to pose data  
-- **Model training & prediction** — LightGBM, XGBoost, HistGradientBoosting  
-- **End‑to‑end orchestration** — run the full pipeline with one command  
+The system is designed for:
 
-> The pipeline is **fully config‑driven** and supports automatic trim computation from annotation timestamps.
+- Research-grade reproducibility  
+- Structured logging  
+- Scalable experimentation  
+- Config-based execution  
 
-Video Annotation System Pipeline  
+---
+
+##  Authentication (HF_TOKEN)
+
+Some tracking models require a **Hugging Face access token**.
+
+### Behavior
+
+When running the pipeline:
+
+- If `HF_TOKEN` is already set in your environment → it is used automatically.
+- If not → the system securely prompts you to enter it (input hidden).
+- The token is automatically injected into:
 ```
-┌────────────────────────────┐  
-│       Raw Video Files      │  
-│     + Annotations (.txt)   │  
-└─────────────┬──────────────┘  
-              │  
-              ▼  
-┌──────────────────────────────┐  
-│     Step 1: Video Processing │  
-│ - Trim videos (optional)     │  
-│ - Object tracking (SAM3)  │  
-│ - Pose overlay (MediaPipe)   │  
-└─────────────┬────────────────┘  
-              │  
-              ▼  
-┌────────────────────────────────┐  
-│     Step 2: Pose Extraction    │  
-│ - Extract JSON keypoints       │  
-│ - Normalize & compute features │  
-│ - Save processed_data.csv      │  
-└─────────────┬──────────────────┘  
-              │  
-        ┌─────┴─────┐  
-        │ Optional  │  
-        ▼           ▼  
-┌───────────────────────────┐  
-│ Step 3: Pose Clustering   │  
-│ - Movement & proximity    │  
-│ - Interaction analysis    │  
-│ - Cluster assignments     │  
-└─────────────┬─────────────┘  
-              │  
-              ▼  
-┌──────────────────────────────┐  
-│ Step 4: Annotation Alignment │  
-│ - Map annotations to pose    │  
-│ - Filter, trim & label frames│  
-│ - Save labeled_features.csv  │  
-└─────────────┬────────────────┘  
-              │  
-              ▼  
-┌─────────────────────────────┐  
-│ Step 5: Model Training      │  
-│ - Combine datasets          │  
-│ - Train XGBoost/LightGBM    │  
-│ - Save model & feature list │  
-└─────────────┬───────────────┘  
-              │  
-              ▼  
-┌────────────────────────────┐  
-│ Step 6: Prediction         │  
-│ - Single-project or batch  │  
-│ - Output predictions.csv   │  
-│ - Optional reports & plots │  
-└────────────────────────────┘  
+
+HUGGINGFACE_HUB_TOKEN
+
+````
+
+### Set token permanently (recommended)
+
+```bash
+export HF_TOKEN=your_token_here
+````
+
+Add this to:
+
+```
+~/.bashrc
+```
+
+or
+
+```
+~/.zshrc
 ```
 
 ---
 
-## Project Structure
+## 📝 Logging System
+
+The pipeline includes **structured logging**.
+
+Each project produces:
+
+```
+processing_log.log
+```
+
+### Logged Information
+
+* Full configuration parameters
+* Crop settings
+* Trim timestamps
+* Model parameters
+* Executed command lines
+* Subprocess STDOUT / STDERR
+* Execution time per step
+* Pipeline success/failure state
+
+### Example Log Snippet
+
+```
+PIPELINE STARTED
+CONFIGURATION PARAMETERS
+DEVICE=cuda
+TEXT_PROMPT=person
+CHUNK_SIZE=300
+IOU_THRESHOLD=0.15
+MAX_OBJECTS=3
+START_TRIM_SEC=260
+END_TRIM_SEC=900
+CROP=(40,40) -> (1240,700)
+
+START STEP: SAM3 tracking
+END STEP: SAM3 tracking (142.38 sec)
+
+PIPELINE FINISHED SUCCESSFULLY
+```
+
+This ensures reproducibility and easier debugging.
+
+---
+
+# Pipeline Architecture
+
+```
+Raw Video + Annotations
+        │
+        ▼
+Step 1: Video Processing
+        │
+        ▼
+Step 2: Pose Extraction
+        │
+        ├── (Optional) Step 3: Pose Clustering
+        │
+        ▼
+Step 4: Annotation Alignment
+        │
+        ▼
+Step 5: Model Training
+        │
+        ▼
+Step 6: Prediction
+```
+
+---
+
+# Project Structure
 
 ```
 video_annotation_system/
@@ -91,81 +146,48 @@ video_annotation_system/
 │   ├── annotations/
 │   ├── models/
 │   ├── configs/
-│   	└── config.yaml              # Global configuration
+│   │   └── config.yaml
 │   └── pipeline/
 │
 ├── data/
-│   ├── raw/                     # Raw video projects
-│   │   ├── project_01/
-│   │   │   └── project_config.yaml   # Auto‑generated (optional)
-│   │   └── project_02/
-│   │
-│   ├── processed/               # Step outputs per project
-│   │   ├── project_01/
-│   │   └── project_02/
-│   │
-│   └── annotations/             # Annotation files (.txt)
+│   ├── raw/
+│   ├── processed/
+│   └── annotations/
 │
-├── models/                      # Trained model artifacts
-├── outputs/                     # Plots, reports, predictions
-│   ├── model_<name>.joblib
-│   ├── feature_names.json
-│   ├── model_metrics.json
-│   ├── model_comparison.png
-│   ├── feature_importance.png
-│   └── model_training_summary.txt
-│
+├── models/
+├── outputs/
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Setup
+# Setup
 
-### 1. Create and activate a virtual environment
+## 1️⃣ Create Virtual Environment
 
 ```bash
 python3 -m venv ~/.venv
 source ~/.venv/bin/activate
 ```
 
-### 2. Install dependencies
+## 2️⃣ Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**Note:** `psifx` is a local package; install it manually *before* installing `requirements.txt`:
+### Install `psifx` First
 
 ```bash
 pip install -e /path/to/psifx
 ```
 
-### 3. Configure the pipeline
-
-Edit:
-
-```
-configs/config.yaml
-```
-
-This file controls paths, flags, model parameters, and pipeline behavior.
-
-Optional per‑project config:
-
-```
-data/raw/<project>/project_config.yaml
-```
-
-Stores trim times and metadata.
-
 ---
 
-## Usage
+# Usage
 
-
-### Run the full pipeline
+## Run Full Pipeline
 
 ```bash
 python src/pipeline/full_pipeline.py
@@ -173,7 +195,7 @@ python src/pipeline/full_pipeline.py
 
 ---
 
-### Run individual steps
+## Run Individual Steps
 
 ```bash
 # Step 1: Video processing
@@ -195,89 +217,207 @@ python src/models/train.py
 python src/models/predict.py
 ```
 
-Each script reads `configs/config.yaml` and processes all projects in the configured directories.
+Each script reads:
 
----
-
-## Pipeline Stages
-
-### **Step 1 — Video Processing**
-
-**Inputs:** raw video files (e.g., `camera_a.mkv`)  
-**Outputs:** trimmed videos, tracking overlays, pose JSON archives  
-
-- Trim times computed automatically from annotation timestamps if no `project_config.yaml` exists  
-- Controlled by: `flags.skip_video_processing`
-
----
-
-### **Step 2 — Pose Extraction**
-
-**Inputs:** JSON archives from Step 1  
-**Outputs:** `processed_data.csv` (frame‑level features, keypoints, temporal features)  
-
-- Controlled by: `flags.skip_pose_extraction`
-
----
-
-### **Step 3 — Pose Clustering (Optional)**
-
-**Inputs:** `processed_data.csv`  
-**Outputs:** cluster assignments, clinical metrics, plots  
-
-- Controlled by: `flags.skip_pose_clustering`
-
----
-
-### **Step 4 — Annotation Alignment**
-
-**Inputs:** `processed_data.csv`, annotation `.txt` files  
-**Outputs:** `labeled_features.csv`, annotation statistics plots  
-
-- Automatically trims pose data to annotation timestamp ranges
-
----
-
-### **Step 5 — Model Training**
-
-**Inputs:** combined labeled features  
-**Outputs:** trained model, feature names, metrics, plots  
-
-- Training is skipped automatically if `model.file` already exists
-
----
-
-### **Step 6 — Prediction**
-
-**Inputs:** new pose data + trained model  
-**Outputs:** predictions CSV, optional report, confusion matrix  
-
-Modes:
-
-- **Single project:** set `predict.data_path`
-- **Batch mode:** leave `predict.data_path` empty
-
----
-
-## Example Output
-
-```bash
-outputs/
-├── plots/
-│   ├── movement_speed.png
-│   └── cluster_distribution_Therapist.png
-├── reports/
-│   └── annotation_stats_project_01.png
-data/processed/project_01/
-├── processed_data.csv
-├── labeled_features.csv
-└── PoseDir/
-    └── *.tar.gz
+```
+configs/config.yaml
 ```
 
-## Automated Tests & Config Validation
+---
 
-Run via:
+# Pipeline Stages
+
+---
+
+## Step 1 — Video Processing
+
+**Inputs**
+
+* Raw video (e.g., `camera_a.mkv`)
+* Annotation timestamps
+
+**Operations**
+
+* Automatic trim computation from annotations
+* Object tracking (SAM-based)
+* Pose estimation (MediaPipe)
+* Overlay visualization
+
+**Outputs**
+
+```
+processed_video.mp4
+MaskDir/
+PosesDir/
+Visualizations/
+processing_log.log
+```
+
+Controlled by:
+
+```
+flags.skip_video_processing
+```
+
+---
+
+## Step 2 — Pose Extraction
+
+Extracts:
+
+* Frame-level keypoints
+* Normalized coordinates
+* Movement features
+* Temporal derivatives
+
+Output:
+
+```
+processed_data.csv
+```
+
+Controlled by:
+
+```
+flags.skip_pose_extraction
+```
+
+---
+
+## Step 3 — Pose Clustering (Optional)
+
+Computes:
+
+* Movement speed
+* Distance metrics
+* Interaction patterns
+* Cluster assignments
+
+Controlled by:
+
+```
+flags.skip_pose_clustering
+```
+
+---
+
+## Step 4 — Annotation Alignment
+
+* Maps annotation timestamps to frames
+* Automatically trims pose data
+* Generates labeled dataset
+
+Output:
+
+```
+labeled_features.csv
+```
+
+---
+
+## Step 5 — Model Training
+
+Supported models:
+
+* LightGBM
+* XGBoost
+* HistGradientBoosting
+
+Outputs:
+
+```
+model.joblib
+feature_names.json
+model_metrics.json
+feature_importance.png
+```
+
+Training is skipped automatically if the model file already exists.
+
+---
+
+## Step 6 — Prediction
+
+### Single Project
+
+Set in `config.yaml`:
+
+```yaml
+predict:
+  data_path: path/to/project
+```
+
+### Batch Mode
+
+Leave `data_path` empty.
+
+Outputs:
+
+```
+predictions.csv
+confusion_matrix.png
+```
+
+---
+
+# Configuration System
+
+All behavior is controlled via:
+
+```
+configs/config.yaml
+```
+
+Includes:
+
+* Paths
+* Skip flags
+* Model hyperparameters
+* Prediction settings
+* Auto-trim behavior
+
+Optional per-project configuration:
+
+```
+data/raw/<project>/project_config.yaml
+```
+
+Stores computed trim timestamps and metadata.
+
+---
+
+# Reproducibility Features
+
+* Structured logging
+* Explicit parameter logging at startup
+* Environment variable capture
+* Deterministic feature generation
+* Config-driven execution
+* Step timing metrics
+
+---
+
+# Example Output
+
+```
+data/processed/project_01/
+├── processed_video.mp4
+├── MaskDir/
+├── PosesDir/
+├── processed_data.csv
+├── labeled_features.csv
+└── processing_log.log
+
+outputs/
+├── model_xgboost.joblib
+├── model_metrics.json
+├── feature_importance.png
+└── model_training_summary.txt
+```
+
+---
+
+# Automated Tests
 
 ```bash
 pytest tests/
@@ -285,29 +425,32 @@ pytest tests/
 
 ---
 
-## Tips
+# Requirements
 
-- **Auto‑trim from annotation:** pipeline uses first/last annotated event ± buffer  
-- **Rerun a specific step:** set the corresponding `skip_*` flag to `false`  
-- **Retrain model:** delete `models/model_xgboost.joblib`  
-- **Enable pose clustering:** set `flags.skip_pose_clustering: false`
+* Python 3.10+
+* torch
+* mediapipe
+* scikit-learn
+* lightgbm
+* xgboost
+* opencv-python
+* pyyaml
+* matplotlib
+* seaborn
+
+See `requirements.txt` for the full dependency list.
 
 ---
 
-## Requirements
+# Recent Updates
 
-- **Python 3.10+**
-- Key packages:
-  - `torch`
-  - `mediapipe`
-  - `scikit-learn`
-  - `lightgbm`
-  - `xgboost`
-  - `opencv-python`
-  - `pyyaml`
-  - `matplotlib`
-  - `seaborn`
+* Interactive `HF_TOKEN` prompt
+* Secure token handling
+* Structured logging system
+* Execution time tracking per step
+* Full configuration logging at startup
+* Subprocess STDOUT/STDERR capture
+* Improved reproducibility
 
-See `requirements.txt` for the full list.
-
-
+```
+```
