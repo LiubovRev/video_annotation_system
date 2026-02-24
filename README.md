@@ -3,55 +3,56 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
 
-**A modular, config-driven pipeline for video preprocessing, pose extraction, annotation alignment, clustering, and ML-based behavior prediction.**
+A modular, config-driven pipeline for video preprocessing, pose extraction, annotation alignment, clustering, and machine-learning-based behavior prediction.
 
 ---
 
 ## Overview
 
-This project implements a **modular, config-driven pipeline** for:
+This project implements a modular and reproducible pipeline for:
 
-- Video preprocessing  
-- Object tracking  
-- Pose estimation  
-- Optional clustering  
-- Annotation alignment  
-- Machine learning classification  
-- Prediction on new data  
+- Video preprocessing
+- Object tracking
+- Pose estimation
+- Optional pose clustering
+- Annotation alignment
+- Machine learning model training
+- Prediction on new data
 
 The system is designed for:
 
-- Research-grade reproducibility  
-- Structured logging  
-- Scalable experimentation  
-- Config-based execution  
+- Research-grade reproducibility
+- Structured logging
+- Scalable experimentation
+- Fully configuration-driven execution
 
 ---
 
-##  Authentication (HF_TOKEN)
+## Authentication (HF_TOKEN)
 
-Some tracking models require a **Hugging Face access token**.
+Some tracking models require a Hugging Face access token.
 
-### Behavior
+### Runtime Behavior
 
 When running the pipeline:
 
-- If `HF_TOKEN` is already set in your environment → it is used automatically.
-- If not → the system securely prompts you to enter it (input hidden).
-- The token is automatically injected into:
+- If `HF_TOKEN` is already set in your environment, it is used automatically.
+- If not, the system securely prompts you to enter it (input is hidden).
+- The token is automatically injected into the environment variable:
+
 ```
 
 HUGGINGFACE_HUB_TOKEN
 
 ````
 
-### Set token permanently (recommended)
+### Set Token Permanently (Recommended)
 
 ```bash
 export HF_TOKEN=your_token_here
 ````
 
-Add this to:
+Add this line to:
 
 ```
 ~/.bashrc
@@ -65,11 +66,11 @@ or
 
 ---
 
-##  Logging System
+## Logging System
 
-The pipeline includes **structured logging**.
+The pipeline includes structured logging.
 
-Each project produces:
+Each processed project produces:
 
 ```
 processing_log.log
@@ -82,9 +83,9 @@ processing_log.log
 * Trim timestamps
 * Model parameters
 * Executed command lines
-* Subprocess STDOUT / STDERR
+* Subprocess STDOUT and STDERR
 * Execution time per step
-* Pipeline success/failure state
+* Pipeline success or failure state
 
 ### Example Log Snippet
 
@@ -106,11 +107,11 @@ END STEP: SAM3 tracking (142.38 sec)
 PIPELINE FINISHED SUCCESSFULLY
 ```
 
-This ensures reproducibility and easier debugging.
+This ensures reproducibility and simplifies debugging.
 
 ---
 
-# Pipeline Architecture
+## Pipeline Architecture
 
 ```
 Raw Video + Annotations
@@ -135,7 +136,7 @@ Step 6: Prediction
 
 ---
 
-# Project Structure
+## Project Structure
 
 ```
 video_annotation_system/
@@ -162,47 +163,53 @@ video_annotation_system/
 
 ---
 
-# Setup
+## Setup
 
-## 1️⃣ Create and Activate Virtual Environment
+### 1. Create and Activate Virtual Environment (Using uv)
 
 From the project root:
+
 ```bash
 uv venv .venv
 ```
 
-Activate macOS / Linux  
+Activate on macOS / Linux:
+
 ```bash
 source .venv/bin/activate
 ```
 
-Activate Windows (PowerShell)  
-```bash
+Activate on Windows (PowerShell):
+
+```powershell
 .venv\Scripts\Activate.ps1
 ```
-## 2️⃣ Install Dependencies
 
-### Install `psifx` 
+### 2. Install Dependencies
+
+Install `psifx` first (local package):
+
 ```bash
 uv pip install -e /path/to/psifx
 ```
-### Then install project requirements
+
+Then install project requirements:
+
 ```bash
 uv pip install -r requirements.txt
 ```
+
 ---
 
-# Usage
+## Usage
 
-## Run Full Pipeline
+### Run Full Pipeline
 
 ```bash
 python src/pipeline/full_pipeline.py
 ```
 
----
-
-## Run Individual Steps
+### Run Individual Steps
 
 ```bash
 # Step 1: Video processing
@@ -224,7 +231,7 @@ python src/models/train.py
 python src/models/predict.py
 ```
 
-Each script reads:
+Each script reads configuration from:
 
 ```
 configs/config.yaml
@@ -232,11 +239,9 @@ configs/config.yaml
 
 ---
 
-# Pipeline Stages
+## Pipeline Stages
 
----
-
-## Step 1 — Video Processing
+### Step 1 — Video Processing
 
 **Inputs**
 
@@ -268,7 +273,7 @@ flags.skip_video_processing
 
 ---
 
-## Step 2 — Pose Extraction
+### Step 2 — Pose Extraction
 
 Extracts:
 
@@ -291,7 +296,7 @@ flags.skip_pose_extraction
 
 ---
 
-## Step 3 — Pose Clustering (Optional)
+### Step 3 — Pose Clustering (Optional)
 
 Computes:
 
@@ -308,7 +313,7 @@ flags.skip_pose_clustering
 
 ---
 
-## Step 4 — Annotation Alignment
+### Step 4 — Annotation Alignment
 
 * Maps annotation timestamps to frames
 * Automatically trims pose data
@@ -322,7 +327,7 @@ labeled_features.csv
 
 ---
 
-## Step 5 — Model Training
+### Step 5 — Model Training
 
 Supported models:
 
@@ -343,9 +348,9 @@ Training is skipped automatically if the model file already exists.
 
 ---
 
-## Step 6 — Prediction
+### Step 6 — Prediction
 
-### Single Project
+#### Single Project
 
 Set in `config.yaml`:
 
@@ -354,7 +359,7 @@ predict:
   data_path: path/to/project
 ```
 
-### Batch Mode
+#### Batch Mode
 
 Leave `data_path` empty.
 
@@ -367,7 +372,7 @@ confusion_matrix.png
 
 ---
 
-# Configuration System
+## Configuration System
 
 All behavior is controlled via:
 
@@ -375,7 +380,7 @@ All behavior is controlled via:
 configs/config.yaml
 ```
 
-Includes:
+This file includes:
 
 * Paths
 * Skip flags
@@ -389,11 +394,11 @@ Optional per-project configuration:
 data/raw/<project>/project_config.yaml
 ```
 
-Stores computed trim timestamps and metadata.
+This file stores computed trim timestamps and metadata.
 
 ---
 
-# Reproducibility Features
+## Reproducibility Features
 
 * Structured logging
 * Explicit parameter logging at startup
@@ -404,7 +409,7 @@ Stores computed trim timestamps and metadata.
 
 ---
 
-# Example Output
+## Example Output
 
 ```
 data/processed/project_01/
@@ -424,7 +429,7 @@ outputs/
 
 ---
 
-# Automated Tests
+## Automated Tests
 
 ```bash
 pytest tests/
@@ -432,7 +437,7 @@ pytest tests/
 
 ---
 
-# Requirements
+## Requirements
 
 * Python 3.10+
 * torch
@@ -449,14 +454,14 @@ See `requirements.txt` for the full dependency list.
 
 ---
 
-# Recent Updates
+## Recent Updates
 
 * Interactive `HF_TOKEN` prompt
 * Secure token handling
 * Structured logging system
 * Execution time tracking per step
 * Full configuration logging at startup
-* Subprocess STDOUT/STDERR capture
+* Subprocess STDOUT and STDERR capture
 * Improved reproducibility
 
 ```
