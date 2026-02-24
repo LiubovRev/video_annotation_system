@@ -65,7 +65,7 @@ or
 
 ---
 
-## 📝 Logging System
+##  Logging System
 
 The pipeline includes **structured logging**.
 
@@ -164,25 +164,32 @@ video_annotation_system/
 
 # Setup
 
-## 1️⃣ Create Virtual Environment
+## 1️⃣ Create and Activate Virtual Environment
 
+From the project root:
 ```bash
-python3 -m venv ~/.venv
-source ~/.venv/bin/activate
+uv venv .venv
 ```
 
+Activate macOS / Linux  
+```bash
+source .venv/bin/activate
+```
+
+Activate Windows (PowerShell)  
+```bash
+.venv\Scripts\Activate.ps1
+```
 ## 2️⃣ Install Dependencies
 
+### Install `psifx` 
 ```bash
-pip install -r requirements.txt
+uv pip install -e /path/to/psifx
 ```
-
-### Install `psifx` First
-
+### Then install project requirements
 ```bash
-pip install -e /path/to/psifx
+uv pip install -r requirements.txt
 ```
-
 ---
 
 # Usage
