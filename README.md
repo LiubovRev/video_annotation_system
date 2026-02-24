@@ -1,4 +1,3 @@
-```md
 # Video Annotation System
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
@@ -458,5 +457,3 @@ See `requirements.txt` for the full dependency list.
 * Subprocess STDOUT and STDERR capture
 * Improved reproducibility
 
-```
-```
