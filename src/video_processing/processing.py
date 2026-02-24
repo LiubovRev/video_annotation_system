@@ -1,229 +1,269 @@
 #!/usr/bin/env python3
-# coding: utf-8
-"""
-processing.py
--------------
-Step 1 of the Video Annotation Pipeline: Video preprocessing per project.
+from __future__ import annotations
 
-Features:
-  - Trim and sample raw video with ffmpeg
-  - Run SAMURAI tracking inference (psifx)
-  - Run MediaPipe pose inference (psifx)
-  - Visualize tracking and pose results
-  - Clean up intermediate frames directory
-
-Can be run standalone or imported by full_pipeline.py via run_video_processing().
-"""
-
-import subprocess
+import os
 import shutil
+import subprocess
+import sys
+import time
+import logging
+import getpass
 from pathlib import Path
-import yaml
+from typing import Optional
 
-# =============================================================================
-# Helpers
-# =============================================================================
+# ==========================================================
+# ===================== SETTINGS ===========================
+# ==========================================================
 
-def _log(log_file: Path, message: str) -> None:
-    """Append a message to the project log file."""
-    with open(log_file, "a") as f:
-        f.write(message + "\n")
+DEVICE = "cuda"
+
+TEXT_PROMPT = "person"
+CHUNK_SIZE = 300
+IOU_THRESHOLD = 0.15
+MAX_OBJECTS: Optional[int] = 3
+
+START_TRIM_SEC = 260
+END_TRIM_SEC = int(15 * 60)
+
+# ----------------------------------------------------------
+# GLOBAL SCENE CROP
+# ----------------------------------------------------------
+
+X_MIN = 40
+Y_MIN = 40
+X_MAX = 1240
+Y_MAX = 700
+
+RESIZE_W = None
+RESIZE_H = None
+
+POSE_MASK_THRESHOLD = "0.0"
+POSE_MODEL_COMPLEXITY = "2"
+
+BASE_PATH = Path(
+    "/home/liubov/Bureau/new/29-10-2024_#2_INDIVIDUAL_[83]"
+)
+
+RAW_VIDEO = BASE_PATH / "camera_a.mkv"
+PROCESSED_VIDEO = BASE_PATH / "processed_video.mp4"
+
+MASK_DIR = BASE_PATH / "MaskDir"
+POSES_DIR = BASE_PATH / "PosesDir"
+VIS_DIR = BASE_PATH / "Visualizations"
+LOG_FILE = BASE_PATH / "processing_log.log"
 
 
-def _run_cmd(cmd: list, step_desc: str, log_file: Path) -> subprocess.CompletedProcess:
-    """Run a shell command, print output, log errors, and raise on failure."""
-    print(f"\n>>> {step_desc}")
-    print("Command:", " ".join(map(str, cmd)))
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        print("✅ Succeeded.")
-        if result.stdout:
-            print("STDOUT:", result.stdout.strip())
-        if result.stderr:
-            print("STDERR:", result.stderr.strip())
-        return result
-    except subprocess.CalledProcessError as e:
-        print(f"❌ {step_desc} failed (exit {e.returncode})")
-        print("STDOUT:", e.stdout)
-        print("STDERR:", e.stderr)
-        _log(log_file, f"[FAILED] {step_desc}: {e.stderr.strip()}")
-        raise
+# ==========================================================
+# ===================== TOKEN INPUT ========================
+# ==========================================================
 
-# =============================================================================
-# Core function
-# =============================================================================
-
-def run_video_processing(project_path: Path, cfg: dict, debug_keep_frames: bool = False) -> bool:
+def ensure_hf_token():
     """
-    Run full video preprocessing for a single project.
-
-    Args:
-        project_path: Path to the project directory
-        cfg: Parsed configuration dictionary
-        debug_keep_frames: If True, skips deleting extracted frames
-
-    Returns:
-        True on success, False if processing failed or skipped.
+    Ask user for HF_TOKEN if not present in environment.
     """
-    vc = cfg["video_processing"]
-    trim = cfg.get("trim_times", {})
-    default_trim = cfg.get("default_trim", [0, None, vc.get("fps", 15)])
+    if "HF_TOKEN" in os.environ and os.environ["HF_TOKEN"].strip():
+        return
 
-    project_name = project_path.name
-    raw_video = project_path / vc["raw_video_filename"]
-    processed_video = project_path / "processed_video.mp4"
-    log_file = project_path / "processing_log.log"
-    log_file.write_text(f"=== Processing Log for {project_name} ===\n")
+    print("\n HuggingFace token required.")
+    token = getpass.getpass("Enter HF_TOKEN (input hidden): ").strip()
 
-    # Directory setup
-    dirs = {
-        "frames": project_path / "Frames",
-        "masks":  project_path / "MaskDir",
-        "poses":  project_path / "PosesDir",
-        "visual": project_path / "Visualizations"
-    }
-    for d in dirs.values():
-        d.mkdir(parents=True, exist_ok=True)
+    if not token:
+        raise RuntimeError("HF_TOKEN is required.")
 
-    print(f"\n{'='*70}\nVideo processing: {project_name}\n{'='*70}")
+    os.environ["HF_TOKEN"] = token
 
-    # Skip if flagged
-    if cfg["flags"].get("skip_video_processing", False) and processed_video.exists():
-        print("  → Skipping — processed video already exists.")
-        _log(log_file, "[SKIPPED] Processed video exists.")
-        return True
 
-    if not raw_video.exists():
-        print(f"  ❌ Raw video not found: {raw_video}")
-        _log(log_file, "[SKIPPED] Raw video missing.")
-        return False
+# ==========================================================
+# ===================== LOGGING ============================
+# ==========================================================
 
-    start_sec, end_sec, fps = trim.get(project_name, default_trim)
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        handlers=[
+            logging.FileHandler(LOG_FILE),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
 
-    # --- Step 1: Trim & sample ---
-    if dirs["frames"].exists() and any(dirs["frames"].iterdir()):
-        print("  → Frames already exist — skipping frame extraction.")
-        _log(log_file, "[SKIPPED] Frame extraction exists.")
-    else:
-        if not processed_video.exists():
-            ffmpeg_cmd = [
-                "ffmpeg", "-y", "-i", str(raw_video),
-                "-ss", str(start_sec),
-                *(["-to", str(end_sec)] if end_sec is not None else []),
-                "-filter:v", f"fps={fps}",
-                str(processed_video)
-            ]
-            try:
-                _run_cmd(ffmpeg_cmd, "Trim and sample video", log_file)
-                _log(log_file, f"[OK] Processed video created: {processed_video.name}")
-            except Exception:
-                return False
-        else:
-            print("  → Processed video already exists — skipping ffmpeg trim.")
-            _log(log_file, f"[OK] Processed video exists: {processed_video.name}")
+    logging.info("=" * 80)
+    logging.info("PIPELINE STARTED")
+    logging.info("=" * 80)
 
-    # --- Step 2: Tracking inference ---
-    try:
-        _run_cmd([
-            "psifx", "video", "tracking", "samurai", "inference",
-            "--video", str(processed_video),
-            "--mask_dir", str(dirs["masks"]),
-            "--model_size", vc["model_size"],
-            "--yolo_model", vc["yolo_model"],
-            "--max_objects", str(vc["nb_objects"]),
-            "--step", str(vc["step_size"]),
-            "--device", vc["device"],
-            "--overwrite"
-        ], "Tracking inference", log_file)
-        _log(log_file, "[OK] Tracking inference completed.")
-    except Exception:
-        return False
 
-    # --- Step 2b: Tracking visualization ---
-    vis_track = dirs["visual"] / "visualization_tracking.mp4"
-    try:
-        _run_cmd([
-            "psifx", "video", "tracking", "visualization",
-            "--video", str(processed_video),
-            "--masks", str(dirs["masks"]),
-            "--visualization", str(vis_track),
-            "--overwrite"
-        ], "Tracking visualization", log_file)
-        _log(log_file, "[OK] Tracking visualization completed.")
-    except Exception as e:
-        print(f"  ⚠ Warning: Tracking visualization failed: {e}")
-        _log(log_file, f"[WARNING] Tracking visualization failed.")
+def log_configuration():
+    logging.info("CONFIGURATION PARAMETERS")
+    logging.info("-" * 80)
 
-    # --- Step 3: Pose inference ---
-    try:
-        _run_cmd([
-            "psifx", "video", "pose", "mediapipe", "multi-inference",
-            "--video", str(processed_video),
-            "--masks", str(dirs["masks"]),
-            "--poses_dir", str(dirs["poses"]),
-            "--device", vc["device"],
-            "--overwrite"
-        ], "Pose inference", log_file)
-        _log(log_file, "[OK] Pose inference completed.")
-    except Exception:
-        return False
+    logging.info("DEVICE=%s", DEVICE)
+    logging.info("TEXT_PROMPT=%s", TEXT_PROMPT)
+    logging.info("CHUNK_SIZE=%s", CHUNK_SIZE)
+    logging.info("IOU_THRESHOLD=%s", IOU_THRESHOLD)
+    logging.info("MAX_OBJECTS=%s", MAX_OBJECTS)
 
-    # --- Step 3b: Pose visualization ---
-    vis_pose = dirs["visual"] / "visualization_pose.mp4"
-    try:
-        _run_cmd([
-            "psifx", "video", "pose", "mediapipe", "visualization",
-            "--video", str(processed_video),
-            "--poses", str(dirs["poses"]),
-            "--visualization", str(vis_pose),
-            "--confidence_threshold", "0.0",
-            "--overwrite"
-        ], "Pose visualization", log_file)
-        _log(log_file, "[OK] Pose visualization completed.")
-    except Exception as e:
-        print(f"  ⚠ Warning: Pose visualization failed: {e}")
-        _log(log_file, "[WARNING] Pose visualization failed.")
+    logging.info("START_TRIM_SEC=%s", START_TRIM_SEC)
+    logging.info("END_TRIM_SEC=%s", END_TRIM_SEC)
 
-    # --- Step 4: Cleanup frames ---
-    if not debug_keep_frames:
-        try:
-            if dirs["frames"].exists():
-                shutil.rmtree(dirs["frames"])
-                print("  → Cleaned up frames directory.")
-                _log(log_file, "[OK] Frames cleaned up.")
-        except Exception as e:
-            print(f"  ⚠ Warning: Could not clean frames directory: {e}")
-            _log(log_file, "[WARNING] Frames cleanup failed.")
+    logging.info(
+        "CROP=(%s,%s) -> (%s,%s)",
+        X_MIN, Y_MIN, X_MAX, Y_MAX
+    )
 
-    print(f"✅ Video processing complete for project: {project_name}")
-    print(f"  Log file: {log_file}")
-    return True
+    logging.info("POSE_MASK_THRESHOLD=%s", POSE_MASK_THRESHOLD)
+    logging.info("POSE_MODEL_COMPLEXITY=%s", POSE_MODEL_COMPLEXITY)
 
-# =============================================================================
-# Standalone entry point
-# =============================================================================
+    logging.info("BASE_PATH=%s", BASE_PATH)
+    logging.info("RAW_VIDEO=%s", RAW_VIDEO)
+
+    logging.info("-" * 80)
+
+
+# ==========================================================
+# ===================== UTILITIES ==========================
+# ==========================================================
+
+def run(cmd, name, env):
+    logging.info("START STEP: %s", name)
+    logging.info("COMMAND: %s", " ".join(map(str, cmd)))
+
+    start = time.time()
+
+    r = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+
+    duration = time.time() - start
+
+    if r.stdout:
+        logging.info("STDOUT:\n%s", r.stdout)
+
+    if r.stderr:
+        logging.warning("STDERR:\n%s", r.stderr)
+
+    if r.returncode != 0:
+        logging.error("STEP FAILED: %s", name)
+        raise RuntimeError(name)
+
+    logging.info("END STEP: %s (%.2f sec)", name, duration)
+    logging.info("-" * 80)
+
+
+def wipe(p: Path):
+    if p.exists():
+        logging.info("Removing directory: %s", p)
+        shutil.rmtree(p)
+
+    p.mkdir(parents=True, exist_ok=True)
+    logging.info("Created directory: %s", p)
+
+
+def build_env():
+    env = os.environ.copy()
+
+    env.setdefault(
+        "PYTORCH_CUDA_ALLOC_CONF",
+        "expandable_segments:True"
+    )
+
+    if MAX_OBJECTS:
+        env["PSIFX_MAX_OBJECTS"] = str(MAX_OBJECTS)
+
+    if "HF_TOKEN" in env:
+        env["HUGGINGFACE_HUB_TOKEN"] = env["HF_TOKEN"]
+
+    return env
+
+
+# ==========================================================
+# ===================== FFMPEG =============================
+# ==========================================================
+
+def build_ffmpeg():
+    crop = f"crop={X_MAX-X_MIN}:{Y_MAX-Y_MIN}:{X_MIN}:{Y_MIN}"
+    vf = [crop]
+
+    if RESIZE_W or RESIZE_H:
+        vf.append(f"scale={RESIZE_W or -1}:{RESIZE_H or -1}")
+
+    return [
+        "ffmpeg", "-y", "-hide_banner",
+        "-ss", str(START_TRIM_SEC),
+        "-to", str(END_TRIM_SEC),
+        "-i", str(RAW_VIDEO),
+        "-map", "0:0",
+        "-vf", ",".join(vf),
+        "-c:v", "libx264",
+        "-preset", "slow",
+        "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        str(PROCESSED_VIDEO)
+    ]
+
+
+# ==========================================================
+# ===================== PIPELINE ===========================
+# ==========================================================
 
 def main():
-    CONFIG_FILE = Path(__file__).parent.parent.parent / "config.yaml"
-    if not CONFIG_FILE.exists():
-        raise FileNotFoundError(f"Config file not found: {CONFIG_FILE}")
 
-    with open(CONFIG_FILE, "r") as f:
-        cfg = yaml.safe_load(f)
+    ensure_hf_token()
+    setup_logging()
+    log_configuration()
 
-    raw_video_root = Path(cfg["directories"]["raw_video_root"])
-    project_dirs = [d for d in raw_video_root.iterdir() if d.is_dir()]
+    env = build_env()
 
-    print(f"Found {len(project_dirs)} project directories in {raw_video_root}")
+    wipe(MASK_DIR)
+    wipe(POSES_DIR)
+    wipe(VIS_DIR)
 
-    results = {}
-    for project_path in sorted(project_dirs):
-        success = run_video_processing(project_path, cfg)
-        results[project_path.name] = "OK" if success else "FAILED/SKIPPED"
+    run(build_ffmpeg(), "Create processed video", env)
 
-    print(f"\n{'='*70}\nVIDEO PROCESSING SUMMARY\n{'='*70}")
-    for name, status in results.items():
-        print(f"  {status:15s}  {name}")
+    run([
+        "psifx", "video", "tracking", "sam3", "inference",
+        "--video", str(PROCESSED_VIDEO),
+        "--mask_dir", str(MASK_DIR),
+        "--text_prompt", TEXT_PROMPT,
+        "--chunk_size", str(CHUNK_SIZE),
+        "--iou_threshold", str(IOU_THRESHOLD),
+        "--device", DEVICE,
+    ], "SAM3 tracking", env)
+
+    run([
+        "psifx", "video", "tracking", "visualization",
+        "--video", str(PROCESSED_VIDEO),
+        "--masks", str(MASK_DIR),
+        "--visualization",
+        str(VIS_DIR / "tracking.mp4"),
+        "--labels", "--color"
+    ], "Tracking visualization", env)
+
+    run([
+        "psifx", "video", "pose", "mediapipe", "multi-inference",
+        "--video", str(PROCESSED_VIDEO),
+        "--masks", str(MASK_DIR),
+        "--poses_dir", str(POSES_DIR),
+        "--mask_threshold", POSE_MASK_THRESHOLD,
+        "--model_complexity", POSE_MODEL_COMPLEXITY,
+        "--smooth",
+        "--device", DEVICE
+    ], "Pose inference", env)
+
+    run([
+        "psifx", "video", "pose", "mediapipe", "visualization",
+        "--video", str(PROCESSED_VIDEO),
+        "--poses", str(POSES_DIR),
+        "--visualization",
+        str(VIS_DIR / "pose.mp4"),
+        "--confidence_threshold", "0.0"
+    ], "Pose visualization", env)
+
+    logging.info("PIPELINE FINISHED SUCCESSFULLY")
+    logging.info("=" * 80)
+
 
 if __name__ == "__main__":
     main()
