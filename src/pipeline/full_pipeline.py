@@ -93,7 +93,7 @@ for project_dir in project_dirs:
     output_dir = output_base / project_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n▶ Processing project: {project_name}")
+    print(f"\n Processing project: {project_name}")
 
     # Step 1: Video processing
     if not skip_video_processing:
@@ -114,7 +114,7 @@ for project_dir in project_dirs:
     # Merge processed parquet files
     processed_files = list(project_dir.glob("processed_data__*.parquet"))
     if not processed_files:
-        print("  ⚠ No processed parquet files found — skipping project.")
+        print("   No processed parquet files found — skipping project.")
         continue
 
     combined_csv = output_dir / "processed_data.csv"
@@ -179,7 +179,7 @@ if combined_path.exists() and not force_recombine:
 else:
     labeled_files = list(output_base.glob("*/labeled_features.csv"))
     if not labeled_files:
-        print("⚠ No labeled feature files found — cannot combine.")
+        print(" No labeled feature files found — cannot combine.")
         exit()
 
     print(f"✓ Found {len(labeled_files)} labeled feature files.")
@@ -191,7 +191,7 @@ else:
             all_dfs.append(df_part)
             print(f"  ✓ Loaded: {f.parent.name} ({len(df_part):,} rows)")
         except Exception as e:
-            print(f"  ⚠ Skipping {f.name}: {e}")
+            print(f"   Skipping {f.name}: {e}")
 
     if not all_dfs:
         print("✗ No valid dataframes to combine")
