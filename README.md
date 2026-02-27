@@ -2,12 +2,24 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
 
-A modular, config-driven pipeline for video preprocessing, pose extraction, annotation alignment, clustering, and machine-learning-based behavior prediction.
+## Overview
+This project provides a lightweight annotation tool designed to support machine learning workflows for clinical video analysis.
+
+Developed during work at CHUV (Lausanne).
+
+## Purpose
+The system was used to annotate video data for downstream computer vision tasks such as pose-based behavior classification.
+
+## ML Workflow
+Video → Annotation → Feature Extraction → Model Training
+
+## Technologies
+Python, video processing, computer vision workflows
+
+## Status
+Research prototype developed for internal ML experimentation.
 
 ---
-
-## Overview
-
 This project implements a modular and reproducible pipeline for:
 
 - Video preprocessing
@@ -17,14 +29,6 @@ This project implements a modular and reproducible pipeline for:
 - Annotation alignment
 - Machine learning model training
 - Prediction on new data
-
-The system is designed for:
-
-- Research-grade reproducibility
-- Structured logging
-- Scalable experimentation
-- Fully configuration-driven execution
-
 ---
 
 ## Authentication (HF_TOKEN)
