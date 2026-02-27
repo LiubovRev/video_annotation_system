@@ -13,8 +13,11 @@ The system was used to annotate video data for downstream computer vision tasks 
 ## ML Workflow
 Video preprocessing → Object tracking → Pose estimation → Optional pose clustering → Annotation alignment → Machine learning model training → Prediction on new data 
 
-## Technologies
-Python, video processing, computer vision workflows
+## My contribution included:
+- designing and implementing the end-to-end processing pipeline
+- integrating pose estimation
+- developing feature extraction from skeleton keypoints
+- enabling dataset generation for downstream ML model training
 
 ## Status
 Research prototype developed for internal ML experimentation.
