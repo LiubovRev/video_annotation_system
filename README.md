@@ -11,7 +11,7 @@ Developed during work at CHUV (Lausanne).
 The system was used to annotate video data for downstream computer vision tasks such as pose-based behavior classification.
 
 ## ML Workflow
-Video → Annotation → Feature Extraction → Model Training
+Video preprocessing → Object tracking → Pose estimation → Optional pose clustering → Annotation alignment → Machine learning model training → Prediction on new data 
 
 ## Technologies
 Python, video processing, computer vision workflows
@@ -19,16 +19,6 @@ Python, video processing, computer vision workflows
 ## Status
 Research prototype developed for internal ML experimentation.
 
----
-This project implements a modular and reproducible pipeline for:
-
-- Video preprocessing
-- Object tracking
-- Pose estimation
-- Optional pose clustering
-- Annotation alignment
-- Machine learning model training
-- Prediction on new data
 ---
 
 ## Authentication (HF_TOKEN)
