@@ -1,4 +1,8 @@
-# Video Annotation System
+# Clinical Video ML Pipeline for Behavioral Analysis
+
+This repository contains an end-to-end ML system developed during my work with clinical video data at Lausanne University Hospital (CHUV).
+
+The pipeline processes raw therapy session videos, extracts pose keypoints, generates behavioral features, and trains machine learning models to classify interaction patterns.
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue)](https://www.python.org/)
 
